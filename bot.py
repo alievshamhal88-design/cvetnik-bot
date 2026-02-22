@@ -440,3 +440,29 @@ async def main():
 
 if __name__ == '__main__':
     asyncio.run(main())
+    from aiohttp import web
+import os
+
+# Создаём простой веб-сервер для пинга
+async def handle_ping(request):
+    return web.Response(text='OK')
+
+async def run_web_server():
+    app = web.Application()
+    app.router.add_get('/', handle_ping)
+    app.router.add_get('/ping', handle_ping)
+    
+    # Render сам назначает порт через переменную окружения PORT
+    port = int(os.environ.get('PORT', 10000))
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+    print(f"✅ Пинг-сервер запущен на порту {port}")
+
+# ИЗМЕНИТЕ функцию main() на это:
+async def main():
+    # Запускаем веб-сервер для пинга в фоне
+    asyncio.create_task(run_web_server())
+    # Запускаем бота
+    await dp.start_polling(bot)
