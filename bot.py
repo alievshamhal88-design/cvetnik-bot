@@ -1,11 +1,12 @@
 import logging
 import os
 import json
+import asyncio
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 from aiogram.filters import Command
 from aiogram import F
-import asyncio
+from aiohttp import web  # Добавлено для пинг-сервера
 
 # Настройки бота
 API_TOKEN = "8462470094:AAHSlSA20IvbGG2AMOBDL9qk3eqXakzuwWg"
@@ -435,19 +436,13 @@ async def send_order_to_florist(message: types.Message, user_id: int):
             except Exception as e:
                 logging.error(f"❌ Ошибка отправки в {branch_name}: {e}")
 
-async def main():
-    await dp.start_polling(bot)
-
-if __name__ == '__main__':
-    asyncio.run(main())
-    from aiohttp import web
-import os
-
-# Создаём простой веб-сервер для пинга
+# ---------- ПИНГ-СЕРВЕР ДЛЯ RENDER ----------
 async def handle_ping(request):
+    """Обработчик для пинг-запросов от UptimeRobot"""
     return web.Response(text='OK')
 
 async def run_web_server():
+    """Запуск простого веб-сервера для пинга"""
     app = web.Application()
     app.router.add_get('/', handle_ping)
     app.router.add_get('/ping', handle_ping)
@@ -460,9 +455,12 @@ async def run_web_server():
     await site.start()
     print(f"✅ Пинг-сервер запущен на порту {port}")
 
-# ИЗМЕНИТЕ функцию main() на это:
+# ИСПРАВЛЕННАЯ ФУНКЦИЯ MAIN
 async def main():
     # Запускаем веб-сервер для пинга в фоне
     asyncio.create_task(run_web_server())
     # Запускаем бота
     await dp.start_polling(bot)
+
+if __name__ == '__main__':
+    asyncio.run(main())
