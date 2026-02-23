@@ -1,12 +1,11 @@
 import logging
 import os
 import json
-import asyncio
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 from aiogram.filters import Command
 from aiogram import F
-from aiohttp import web  # Добавлено для пинг-сервера
+import asyncio
 
 # Настройки бота
 API_TOKEN = "8462470094:AAHSlSA20IvbGG2AMOBDL9qk3eqXakzuwWg"
@@ -90,16 +89,58 @@ main_keyboard = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
 
+# ---------- ИСПРАВЛЕННАЯ ФУНКЦИЯ cmd_start С ПОДДЕРЖКОЙ ПАРАМЕТРОВ ----------
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     user_id = message.from_user.id
+    # Получаем параметр после start= (например: start=product_101_101%20роза)
+    args = message.text.split()
+    product_param = None
+    
+    if len(args) > 1:
+        product_param = args[1]
+    
+    # Сброс состояния
     user_states[user_id] = STATE_IDLE
-    welcome_text = (
-        "🌸 Добро пожаловать в «Цветник»!\n\n"
-        "Я помогу быстро заказать букет с доставкой по Новосибирску.\n\n"
-        "👇 Выберите действие в меню ниже"
-    )
-    await message.answer(welcome_text, reply_markup=main_keyboard)
+    user_data[user_id] = {}
+    
+    # Проверяем, есть ли параметр товара
+    if product_param and product_param.startswith('product_'):
+        # Парсим параметр: product_101_101%20роза
+        parts = product_param.split('_')
+        product_id = parts[1] if len(parts) >= 2 else 'unknown'
+        
+        # Декодируем название товара (если есть)
+        product_name = 'Букет'
+        if len(parts) >= 3:
+            # Собираем остальные части в название
+            product_name_parts = parts[2:]
+            product_name = ' '.join(product_name_parts)
+            # Заменяем %20 на пробелы
+            product_name = product_name.replace('%20', ' ')
+        
+        # Сохраняем выбранный товар
+        user_data[user_id]['product'] = product_name
+        user_data[user_id]['product_id'] = product_id
+        user_data[user_id]['price'] = 0
+        user_data[user_id]['product_source'] = 'site_cart'
+        
+        # Сразу переходим к запросу телефона
+        user_states[user_id] = STATE_WAITING_CLIENT_PHONE
+        
+        await message.answer(
+            f"✅ Вы выбрали: {product_name}\n\n"
+            f"📱 Теперь отправьте ваш номер телефона для оформления заказа:",
+            reply_markup=client_phone_keyboard
+        )
+    else:
+        # Обычный старт
+        welcome_text = (
+            "🌸 Добро пожаловать в «Цветник»!\n\n"
+            "Я помогу быстро заказать букет с доставкой по Новосибирску.\n\n"
+            "👇 Выберите действие в меню ниже"
+        )
+        await message.answer(welcome_text, reply_markup=main_keyboard)
 
 @dp.message(F.text == "🛒 Оформить заказ")
 async def order_start(message: types.Message):
@@ -436,30 +477,7 @@ async def send_order_to_florist(message: types.Message, user_id: int):
             except Exception as e:
                 logging.error(f"❌ Ошибка отправки в {branch_name}: {e}")
 
-# ---------- ПИНГ-СЕРВЕР ДЛЯ RENDER ----------
-async def handle_ping(request):
-    """Обработчик для пинг-запросов от UptimeRobot"""
-    return web.Response(text='OK')
-
-async def run_web_server():
-    """Запуск простого веб-сервера для пинга"""
-    app = web.Application()
-    app.router.add_get('/', handle_ping)
-    app.router.add_get('/ping', handle_ping)
-    
-    # Render сам назначает порт через переменную окружения PORT
-    port = int(os.environ.get('PORT', 10000))
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', port)
-    await site.start()
-    print(f"✅ Пинг-сервер запущен на порту {port}")
-
-# ИСПРАВЛЕННАЯ ФУНКЦИЯ MAIN
 async def main():
-    # Запускаем веб-сервер для пинга в фоне
-    asyncio.create_task(run_web_server())
-    # Запускаем бота
     await dp.start_polling(bot)
 
 if __name__ == '__main__':
