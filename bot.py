@@ -308,37 +308,6 @@ async def birthday_start(message: types.Message):
     )
     user_states[message.from_user.id] = STATE_BIRTHDAY_WAITING
 
-@dp.message(F.text)
-async def handle_birthday_input(message: types.Message):
-    user_id = message.from_user.id
-    if user_states.get(user_id) != STATE_BIRTHDAY_WAITING:
-        return
-    
-    text = message.text.strip()
-    try:
-        parts = text.split(' ', 1)
-        if len(parts) != 2:
-            raise ValueError("Неверный формат")
-        
-        date_str = parts[0]
-        name = parts[1]
-        date_obj = datetime.strptime(date_str, '%d.%m')
-        month_day = date_obj.strftime('%m-%d')
-        db.add_birthday(user_id, name, month_day)
-        
-        await message.answer(
-            f"✅ Готово! Я запомнил день рождения {name} — {date_str}.\n\n"
-            f"За 3 дня до даты я напомню вам и предложу персональную скидку 10%!",
-            reply_markup=main_keyboard
-        )
-        user_states[user_id] = STATE_IDLE
-    except Exception as e:
-        await message.answer(
-            "❌ Неправильный формат. Попробуйте ещё раз, например:\n"
-            "`15.05 мама`",
-            parse_mode='Markdown'
-        )
-
 # ============================================
 # ЦВЕТОЧНАЯ ПОДПИСКА
 # ============================================
@@ -434,13 +403,14 @@ async def order_start(message: types.Message):
     )
 
 # ============================================
-# ОБРАБОТКА ТЕКСТА (ОСНОВНАЯ)
+# ОБРАБОТКА ТЕКСТА (ИСПРАВЛЕННАЯ)
 # ============================================
 @dp.message(F.text)
 async def handle_text(message: types.Message):
     user_id = message.from_user.id
     text = message.text
     
+    # Пропускаем главные кнопки
     if text in ["🛒 Оформить заказ", "🌸 Выбрать букет из каталога", 
                 "🎂 Сохранить день рождения", "📦 Цветочная подписка",
                 "📞 Связаться с флористом", "ℹ️ О нас"]:
@@ -448,7 +418,7 @@ async def handle_text(message: types.Message):
     
     state = user_states.get(user_id)
     
-    # Шаги подписки
+    # Шаги подписки (самые приоритетные)
     if state == STATE_SUB_RECIPIENT:
         user_data[user_id]['sub_recipient'] = text
         user_states[user_id] = STATE_SUB_PHONE
@@ -508,7 +478,7 @@ async def handle_text(message: types.Message):
             await message.answer("❌ Введите число (например: 3000)")
         return
     
-    # Шаги заказа
+    # Шаги заказа (вторые по приоритету)
     if state == STATE_WAITING_PRODUCT:
         user_data[user_id]['product'] = text
         user_states[user_id] = STATE_WAITING_CLIENT_NAME
@@ -597,6 +567,34 @@ async def handle_text(message: types.Message):
             user_states[user_id] = STATE_IDLE
         else:
             await message.answer("Пожалуйста, выберите вариант из меню:")
+        return
+    
+    # День рождения (самый низкий приоритет)
+    if state == STATE_BIRTHDAY_WAITING:
+        try:
+            parts = text.split(' ', 1)
+            if len(parts) != 2:
+                raise ValueError("Неверный формат")
+            
+            date_str = parts[0]
+            name = parts[1]
+            date_obj = datetime.strptime(date_str, '%d.%m')
+            month_day = date_obj.strftime('%m-%d')
+            db.add_birthday(user_id, name, month_day)
+            
+            await message.answer(
+                f"✅ Готово! Я запомнил день рождения {name} — {date_str}.\n\n"
+                f"За 3 дня до даты я напомню вам и предложу персональную скидку 10%!",
+                reply_markup=main_keyboard
+            )
+            user_states[user_id] = STATE_IDLE
+        except Exception as e:
+            await message.answer(
+                "❌ Неправильный формат. Попробуйте ещё раз, например:\n"
+                "`15.05 мама`",
+                parse_mode='Markdown'
+            )
+        return
 
 # ============================================
 # ОТПРАВКА ЗАКАЗА ФЛОРИСТАМ
