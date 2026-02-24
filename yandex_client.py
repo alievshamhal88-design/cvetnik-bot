@@ -19,7 +19,7 @@ class YandexGPTClient:
         self.api_key = api_key
         self.api_url = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
         logger.info(f"✅ YandexGPT клиент инициализирован (folder_id: {folder_id})")
-    
+
     def _prepare_image(self, image_bytes: bytes) -> str:
         """
         Подготавливает изображение для отправки в YandexGPT
@@ -28,15 +28,15 @@ class YandexGPTClient:
         image = Image.open(BytesIO(image_bytes))
         if image.mode != 'RGB':
             image = image.convert('RGB')
-        
+
         # Сохраняем в буфер
         buffer = BytesIO()
         image.save(buffer, format='JPEG', quality=85)
         buffer.seek(0)
-        
+
         # Кодируем в base64
         return base64.b64encode(buffer.read()).decode()
-    
+
     def generate_bouquet_info(self, image_bytes: bytes) -> Optional[Tuple[str, str]]:
         """
         Генерирует название и описание букета по фото
@@ -45,7 +45,7 @@ class YandexGPTClient:
         try:
             # Подготавливаем изображение
             image_base64 = self._prepare_image(image_bytes)
-            
+
             # Формируем промпт для YandexGPT
             prompt = (
                 "Посмотри на это фото букета цветов. Напиши для него:\n\n"
@@ -56,32 +56,29 @@ class YandexGPTClient:
                 "Название: ...\n"
                 "Описание: ..."
             )
-            
-            # Формируем запрос к YandexGPT
+
+            # Формируем запрос к YandexGPT с правильным форматом для изображений
             payload = {
-                "modelUri": f"gpt://{self.folder_id}/yandexgpt-lite",
+                "modelUri": f"gpt://{self.folder_id}/yandexgpt/latest",
                 "completionOptions": {
                     "stream": False,
                     "temperature": 0.7,
-                    "maxTokens": 500
+                    "maxTokens": "500"
                 },
                 "messages": [
                     {
-                        "role": "system",
-                        "text": "Ты — профессиональный флорист и поэт. Твоя задача — создавать красивые названия и описания для букетов цветов."
-                    },
-                    {
                         "role": "user",
-                        "text": prompt
+                        "text": prompt,
+                        "images": [image_base64]  # Изображение передаётся отдельным полем
                     }
                 ]
             }
-            
+
             headers = {
                 "Authorization": f"Api-Key {self.api_key}",
                 "Content-Type": "application/json"
             }
-            
+
             logger.info("🔄 Отправляю запрос к YandexGPT...")
             response = requests.post(
                 self.api_url,
@@ -89,43 +86,43 @@ class YandexGPTClient:
                 json=payload,
                 timeout=60
             )
-            
+
             if response.status_code == 200:
                 result = response.json()
                 text = result['result']['alternatives'][0]['message']['text']
-                
+
                 # Парсим ответ
                 lines = text.split('\n')
                 name = "Волшебный букет"
                 description = "Нежный букет для особенного случая."
-                
+
                 for line in lines:
                     if 'Название:' in line:
                         name = line.replace('Название:', '').strip()
                     elif 'Описание:' in line:
                         description = line.replace('Описание:', '').strip()
-                
+
                 logger.info(f"✅ YandexGPT сгенерировал: {name}")
                 return name, description
             else:
                 logger.error(f"❌ Ошибка YandexGPT: {response.status_code} - {response.text}")
                 return None
-                
+
         except Exception as e:
             logger.error(f"❌ Исключение при работе с YandexGPT: {e}")
             return None
-    
+
     def generate_test(self) -> Optional[str]:
         """
         Тестовый запрос без изображения
         """
         try:
             payload = {
-                "modelUri": f"gpt://{self.folder_id}/yandexgpt-lite",
+                "modelUri": f"gpt://{self.folder_id}/yandexgpt/latest",
                 "completionOptions": {
                     "stream": False,
                     "temperature": 0.7,
-                    "maxTokens": 100
+                    "maxTokens": "100"
                 },
                 "messages": [
                     {
@@ -134,26 +131,26 @@ class YandexGPTClient:
                     }
                 ]
             }
-            
+
             headers = {
                 "Authorization": f"Api-Key {self.api_key}",
                 "Content-Type": "application/json"
             }
-            
+
             response = requests.post(
                 self.api_url,
                 headers=headers,
                 json=payload,
                 timeout=30
             )
-            
+
             if response.status_code == 200:
                 result = response.json()
                 return result['result']['alternatives'][0]['message']['text']
             else:
-                logger.error(f"❌ Ошибка: {response.status_code}")
+                logger.error(f"❌ Ошибка теста: {response.status_code}")
                 return None
-                
+
         except Exception as e:
             logger.error(f"❌ Ошибка теста: {e}")
             return None
