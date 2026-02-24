@@ -69,7 +69,7 @@ class YandexGPTClient:
         return base64.b64encode(buffer.read()).decode()
 
     def generate_bouquet_info(self, image_bytes: bytes) -> Optional[Tuple[str, str]]:
-        """Генерирует название и описание букета по фото (с мультимодальностью)"""
+        """Генерирует название и описание букета по фото"""
         try:
             image_base64 = self._prepare_image(image_bytes)
 
