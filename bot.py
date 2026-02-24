@@ -28,16 +28,19 @@ GIGACHAT_AUTH_KEY = os.getenv("GIGACHAT_AUTH_KEY")
 GIGACHAT_CLIENT_ID = os.getenv("GIGACHAT_CLIENT_ID")
 GIGACHAT_CLIENT_SECRET = os.getenv("GIGACHAT_CLIENT_SECRET")
 
+# Уровень доступа. Если не задан, используется для физических лиц
+GIGACHAT_SCOPE = os.getenv("GIGACHAT_SCOPE", "GIGACHAT_API_PERS")
+
 if GIGACHAT_AUTH_KEY:
-    gigachat = GigaChatClient(auth_key=GIGACHAT_AUTH_KEY)
+    gigachat = GigaChatClient(auth_key=GIGACHAT_AUTH_KEY, scope=GIGACHAT_SCOPE)
 elif GIGACHAT_CLIENT_ID and GIGACHAT_CLIENT_SECRET:
     gigachat = GigaChatClient(
         client_id=GIGACHAT_CLIENT_ID,
-        client_secret=GIGACHAT_CLIENT_SECRET
+        client_secret=GIGACHAT_CLIENT_SECRET,
+        scope=GIGACHAT_SCOPE
     )
 else:
     raise ValueError("❌ Не найдены авторизационные данные для GigaChat!")
-
 BRANCHES = {
     '2-я Марата, 22': {'id': 7364255009, 'username': '@cvetnik_sib', 'is_admin': False},
     'Некрасова, 41': {'id': 7651760894, 'username': '@cvetnik1_sib', 'is_admin': True},
