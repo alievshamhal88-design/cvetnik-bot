@@ -19,7 +19,7 @@ from database import Database
 from yandex_client import YandexGPTClient
 
 # ============================================
-# ЛОГИРОВАНИЕ (ПЕРВЫМ!)
+# ЛОГИРОВАНИЕ
 # ============================================
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -294,6 +294,38 @@ async def handle_admin_photo(message: types.Message):
         await message.answer(f"❌ Ошибка: {e}")
 
 # ============================================
+# ОБРАБОТКА КОНТАКТА (НОМЕРА ТЕЛЕФОНА)
+# ============================================
+@dp.message(F.contact)
+async def handle_client_phone(message: types.Message):
+    user_id = message.from_user.id
+    logger.info(f"📱 Получен контакт от пользователя {user_id}")
+    
+    # Проверяем состояние
+    current_state = user_states.get(user_id)
+    
+    if current_state != STATE_WAITING_CLIENT_PHONE:
+        logger.warning(f"❌ Неверное состояние: {current_state}")
+        await message.answer("Пожалуйста, начните оформление заказа сначала.")
+        return
+    
+    # Сохраняем номер телефона
+    phone = message.contact.phone_number
+    user_data[user_id]['client_phone'] = phone
+    logger.info(f"✅ Номер сохранён: {phone}")
+    
+    # Меняем состояние
+    user_states[user_id] = STATE_WAITING_ADDRESS
+    logger.info(f"➡️ Новое состояние: {STATE_WAITING_ADDRESS}")
+    
+    await message.answer(
+        "✅ Номер получен!\n\n"
+        "📝 Напишите адрес доставки и желаемое время:\n"
+        "Например: ул. Некрасова, 41, кв. 5, сегодня к 18:00",
+        reply_markup=ReplyKeyboardRemove()
+    )
+
+# ============================================
 # ДНИ РОЖДЕНИЯ
 # ============================================
 @dp.message(F.text == "🎂 Сохранить день рождения")
@@ -403,7 +435,7 @@ async def order_start(message: types.Message):
     )
 
 # ============================================
-# ОБРАБОТКА ТЕКСТА (ИСПРАВЛЕННАЯ)
+# ОБРАБОТКА ТЕКСТА (С ПРАВИЛЬНЫМИ ПРИОРИТЕТАМИ)
 # ============================================
 @dp.message(F.text)
 async def handle_text(message: types.Message):
