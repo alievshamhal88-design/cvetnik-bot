@@ -4,9 +4,10 @@ import json
 import asyncio
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
+from aiogram.contrib.middlewares.logging import LoggingMiddleware
 from aiogram.filters import Command
 from aiogram import F
-from aiohttp import web  # Добавляем для пинг-сервера
+from aiohttp import web
 
 # Настройки бота
 API_TOKEN = "8462470094:AAHSlSA20IvbGG2AMOBDL9qk3eqXakzuwWg"
@@ -20,10 +21,12 @@ BRANCHES = {
 
 # Включаем логирование
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Инициализация бота
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
+dp.middleware.setup(LoggingMiddleware())
 
 # Состояния пользователя
 STATE_IDLE = 0
@@ -107,36 +110,30 @@ async def run_web_server():
     await runner.setup()
     site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
-    print(f"✅ Пинг-сервер запущен на порту {port}")
+    logger.info(f"✅ Пинг-сервер запущен на порту {port}")
 
-# ---------- ИСПРАВЛЕННАЯ ФУНКЦИЯ cmd_start С ПОДДЕРЖКОЙ ПАРАМЕТРОВ ----------
-@dp.message(Command("start"))
+# ---------- ОБРАБОТЧИК КОМАНДЫ /start ----------
+@dp.message_handler(commands=['start'])
 async def cmd_start(message: types.Message):
     user_id = message.from_user.id
-    # Получаем параметр после start= (например: start=product_101_101%20роза)
-    args = message.text.split()
-    product_param = None
-    
-    if len(args) > 1:
-        product_param = args[1]
+    logger.info(f"🖥️ Команда /start от пользователя {user_id}")
     
     # Сброс состояния
     user_states[user_id] = STATE_IDLE
     user_data[user_id] = {}
     
     # Проверяем, есть ли параметр товара
-    if product_param and product_param.startswith('product_'):
-        # Парсим параметр: product_101_101%20роза
-        parts = product_param.split('_')
+    args = message.get_args()
+    
+    if args and args.startswith('product_'):
+        # Парсим параметр: product_101_Букет
+        parts = args.split('_')
         product_id = parts[1] if len(parts) >= 2 else 'unknown'
         
-        # Декодируем название товара (если есть)
         product_name = 'Букет'
         if len(parts) >= 3:
-            # Собираем остальные части в название
             product_name_parts = parts[2:]
             product_name = ' '.join(product_name_parts)
-            # Заменяем %20 на пробелы
             product_name = product_name.replace('%20', ' ')
         
         # Сохраняем выбранный товар
@@ -162,13 +159,13 @@ async def cmd_start(message: types.Message):
         )
         await message.answer(welcome_text, reply_markup=main_keyboard)
 
-@dp.message(F.text == "🛒 Оформить заказ")
+@dp.message_handler(lambda message: message.text == "🛒 Оформить заказ")
 async def order_start(message: types.Message):
     user_id = message.from_user.id
     user_states[user_id] = STATE_WAITING_PRODUCT
     user_data[user_id] = {}
     
-    # Кнопка с обычной ссылкой (не WebApp)
+    # Кнопка с обычной ссылкой
     catalog_keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
             text="🌸 Открыть каталог на сайте",
@@ -185,7 +182,7 @@ async def order_start(message: types.Message):
         parse_mode='Markdown'
     )
 
-@dp.message(F.text == "📞 Связаться с флористом")
+@dp.message_handler(lambda message: message.text == "📞 Связаться с флористом")
 async def contact_florist(message: types.Message):
     await message.answer(
         "📞 **Контакты наших филиалов:**\n\n"
@@ -200,7 +197,7 @@ async def contact_florist(message: types.Message):
         reply_markup=main_keyboard
     )
 
-@dp.message(F.text == "ℹ️ О нас")
+@dp.message_handler(lambda message: message.text == "ℹ️ О нас")
 async def about(message: types.Message):
     await message.answer(
         "🌸 **«Цветник»** — сеть студий цветов в Новосибирске\n\n"
@@ -218,7 +215,7 @@ async def about(message: types.Message):
     )
 
 # Обработка фото
-@dp.message(F.photo)
+@dp.message_handler(content_types=['photo'])
 async def handle_photo(message: types.Message):
     user_id = message.from_user.id
     
@@ -243,12 +240,12 @@ async def handle_photo(message: types.Message):
     )
 
 # Обработка текста (название букета и все остальные поля)
-@dp.message(F.text)
+@dp.message_handler()
 async def handle_text(message: types.Message):
     user_id = message.from_user.id
     text = message.text
     
-    # Сначала проверяем, не нажата ли одна из главных кнопок
+    # Проверяем, не нажата ли одна из главных кнопок
     if text == "🛒 Оформить заказ":
         await order_start(message)
         return
@@ -391,7 +388,7 @@ async def handle_text(message: types.Message):
         return
 
 # Обработка контакта (телефон клиента)
-@dp.message(F.contact)
+@dp.message_handler(content_types=['contact'])
 async def handle_client_phone(message: types.Message):
     user_id = message.from_user.id
     
@@ -457,10 +454,10 @@ async def send_order_to_florist(message: types.Message, user_id: int):
                 photo=user_data[user_id]['photo'],
                 caption="📸 Фото букета к заказу выше"
             )
-        logging.info(f"✅ Заказ отправлен администратору {admin_id}")
+        logger.info(f"✅ Заказ отправлен администратору {admin_id}")
     except Exception as e:
-        logging.error(f"❌ Ошибка отправки администратору: {e}")
-        logging.error(f"   Возможно, администратор не запускал бота. Попросите @cvetnik1_sib написать /start")
+        logger.error(f"❌ Ошибка отправки администратору: {e}")
+        logger.error(f"   Возможно, администратор не запускал бота. Попросите @cvetnik1_sib написать /start")
     
     # Отправляем в конкретный филиал (если выбран)
     if branch != "доставка":
@@ -476,9 +473,9 @@ async def send_order_to_florist(message: types.Message, user_id: int):
                     photo=user_data[user_id]['photo'],
                     caption="📸 Фото букета к заказу выше"
                 )
-            logging.info(f"✅ Заказ отправлен в филиал {branch}")
+            logger.info(f"✅ Заказ отправлен в филиал {branch}")
         except Exception as e:
-            logging.error(f"❌ Ошибка отправки в {branch}: {e}")
+            logger.error(f"❌ Ошибка отправки в {branch}: {e}")
     else:
         # При доставке отправляем всем филиалам
         for branch_name, branch_info in BRANCHES.items():
@@ -493,9 +490,9 @@ async def send_order_to_florist(message: types.Message, user_id: int):
                         photo=user_data[user_id]['photo'],
                         caption="📸 Фото букета к заказу выше"
                     )
-                logging.info(f"✅ Заказ отправлен в {branch_name}")
+                logger.info(f"✅ Заказ отправлен в {branch_name}")
             except Exception as e:
-                logging.error(f"❌ Ошибка отправки в {branch_name}: {e}")
+                logger.error(f"❌ Ошибка отправки в {branch_name}: {e}")
 
 # --- ИСПРАВЛЕННАЯ ФУНКЦИЯ MAIN С ЗАПУСКОМ ПИНГ-СЕРВЕРА ---
 async def main():
