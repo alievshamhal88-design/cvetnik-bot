@@ -2,26 +2,33 @@ import logging
 import os
 import json
 import asyncio
-import signal
-import time
+import random
 from datetime import datetime, timedelta
-from functools import wraps
+from io import BytesIO
+from PIL import Image
+import google.generativeai as genai
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.types import (
     ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove,
     InlineKeyboardMarkup, InlineKeyboardButton
 )
 from aiogram.filters import Command
-from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiohttp import web
 
-from config import ADMIN_IDS, POST_TIMES
+from config import ADMIN_IDS, GEMINI_MODELS
 from database import Database
 
 # ============================================
 # НАСТРОЙКИ БОТА
 # ============================================
 API_TOKEN = "8462470094:AAHSlSA20IvbGG2AMOBDL9qk3eqXakzuwWg"
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+if not GEMINI_API_KEY:
+    raise ValueError("❌ GEMINI_API_KEY не найден в переменных окружения!")
+
+# Настройка Gemini
+genai.configure(api_key=GEMINI_API_KEY)
 
 BRANCHES = {
     '2-я Марата, 22': {'id': 7364255009, 'username': '@cvetnik_sib', 'is_admin': False},
@@ -43,21 +50,6 @@ dp = Dispatcher()
 db = Database()
 
 # ============================================
-# КОМАНДА START (УПРОЩЁННАЯ ВЕРСИЯ)
-# ============================================
-@dp.message(Command("start"))
-async def cmd_start(message: types.Message):
-    user_id = message.from_user.id
-    user_states[user_id] = STATE_IDLE
-    user_data[user_id] = {}
-    
-    await message.answer(
-        "🌸 Добро пожаловать в «Цветник»!\n\n"
-        "Я помогу быстро заказать букет с доставкой по Новосибирску.\n\n"
-        "👇 Выберите действие в меню ниже",
-        reply_markup=main_keyboard
-    )
-# ============================================
 # СОСТОЯНИЯ
 # ============================================
 STATE_IDLE = 0
@@ -71,7 +63,7 @@ STATE_WAITING_RECIPIENT_PHONE_INPUT = 9
 STATE_WAITING_CARD_TEXT = 7
 STATE_WAITING_BRANCH = 8
 
-# НОВЫЕ СОСТОЯНИЯ
+# Новые состояния
 STATE_BIRTHDAY_WAITING = 100
 STATE_SUB_RECIPIENT = 101
 STATE_SUB_PHONE = 102
@@ -120,7 +112,6 @@ branch_keyboard = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
 
-# ОБНОВЛЁННОЕ ГЛАВНОЕ МЕНЮ
 main_keyboard = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="🛒 Оформить заказ")],
@@ -152,55 +143,215 @@ async def run_web_server():
     logger.info(f"✅ Пинг-сервер запущен на порту {port}")
 
 # ============================================
-# МОДУЛЬ 1: ПОДБОР ПО ФОТО
+# ФУНКЦИИ ДЛЯ GEMINI
+# ============================================
+async def generate_with_fallback(prompt, image=None, max_retries=3):
+    """Генерирует текст с fallback на разные модели"""
+    
+    for attempt in range(max_retries):
+        for model_name in GEMINI_MODELS:
+            try:
+                model = genai.GenerativeModel(model_name)
+                
+                if image:
+                    response = model.generate_content([prompt, image])
+                else:
+                    response = model.generate_content(prompt)
+                
+                if response and response.text:
+                    return response.text.strip()
+                    
+            except Exception as e:
+                logger.warning(f"⚠️ Ошибка с моделью {model_name}: {e}")
+                continue
+        
+        await asyncio.sleep(1)
+    
+    return None
+
+async def generate_bouquet_info(photo_file_id):
+    """
+    Gemini смотрит на фото и генерирует название и описание
+    """
+    try:
+        # Скачиваем фото
+        file_info = await bot.get_file(photo_file_id)
+        file_bytes = await bot.download_file(file_info.file_path)
+        
+        # Открываем изображение
+        image = Image.open(BytesIO(file_bytes.read()))
+        
+        # Промпт для Gemini
+        prompt = (
+            "Посмотри на это фото букета цветов. Напиши для него:\n\n"
+            "1. КРАСИВОЕ НАЗВАНИЕ (2-4 слова, поэтичное, на русском)\n"
+            "2. КОРОТКОЕ ОПИСАНИЕ (2-3 предложения о букете: какие цветы, "
+            "какое настроение, для какого повода подойдёт)\n\n"
+            "Формат ответа (строго соблюдай):\n"
+            "Название: ...\n"
+            "Описание: ..."
+        )
+        
+        # Отправляем в Gemini
+        result = await generate_with_fallback(prompt, image)
+        
+        if result:
+            # Парсим ответ
+            lines = result.split('\n')
+            name = "Волшебный букет"
+            description = "Нежный букет для особенного случая."
+            
+            for line in lines:
+                if line.startswith('Название:'):
+                    name = line.replace('Название:', '').strip()
+                elif line.startswith('Описание:'):
+                    description = line.replace('Описание:', '').strip()
+            
+            return name, description
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка Gemini: {e}")
+    
+    # Запасные варианты
+    fallback_names = [
+        "Нежность утра", "Цветочная симфония", "Весеннее настроение",
+        "Аромат любви", "Солнечный день", "Летний сад"
+    ]
+    fallback_desc = [
+        "Нежный букет из свежих цветов, собранный с любовью.",
+        "Яркий букет, который подарит радость и хорошее настроение.",
+        "Изысканная композиция для особенного случая."
+    ]
+    
+    return random.choice(fallback_names), random.choice(fallback_desc)
+
+# ============================================
+# ОБРАБОТЧИКИ ФОТО (ДЛЯ АДМИНА)
+# ============================================
+@dp.message(F.photo)
+async def handle_admin_photo(message: types.Message):
+    """Администратор загружает фото для каталога"""
+    user_id = message.from_user.id
+    
+    # Проверяем права
+    if user_id not in ADMIN_IDS:
+        return
+    
+    photo = message.photo[-1]
+    file_id = photo.file_id
+    
+    # Сохраняем фото локально
+    file_info = await bot.get_file(file_id)
+    file_path = f"data/bouquets/{file_id}.jpg"
+    await bot.download_file(file_info.file_path, file_path)
+    
+    # Добавляем в базу (без названия, оно сгенерируется позже)
+    db.add_bouquet(file_id, file_path)
+    
+    await message.answer(
+        f"✅ Фото добавлено в каталог!\n"
+        f"ID: {file_id}\n"
+        f"Всего букетов: {db.get_bouquets_count()}"
+    )
+
+# ============================================
+# КОМАНДА START
+# ============================================
+@dp.message(Command("start"))
+async def cmd_start(message: types.Message):
+    user_id = message.from_user.id
+    user_states[user_id] = STATE_IDLE
+    user_data[user_id] = {}
+    
+    await message.answer(
+        "🌸 Добро пожаловать в «Цветник»!\n\n"
+        "Я помогу быстро заказать букет с доставкой по Новосибирску.\n\n"
+        "👇 Выберите действие в меню ниже",
+        reply_markup=main_keyboard
+    )
+
+# ============================================
+# ТЕСТОВАЯ КОМАНДА
+# ============================================
+@dp.message(Command("test"))
+async def test_handler(message: types.Message):
+    await message.answer(f"✅ Тест работает! Ваш ID: {message.from_user.id}")
+
+# ============================================
+# МОДУЛЬ: ВЫБОР БУКЕТА ИЗ КАТАЛОГА
 # ============================================
 @dp.message(F.text == "🌸 Выбрать букет из каталога")
 async def catalog_start(message: types.Message):
-    bouquets = []
-    for _ in range(3):
-        b = db.get_random_bouquet()
-        if b:
-            bouquets.append(b)
+    """Показывает 3 случайных букета с AI-названиями"""
+    user_id = message.from_user.id
     
-    if not bouquets:
-        await message.answer("😢 В каталоге пока нет букетов. Флорист скоро их добавит!")
+    # Проверяем, есть ли букеты
+    if db.get_bouquets_count() == 0:
+        await message.answer("😢 В каталоге пока нет букетов. Скоро добавим!")
         return
     
-    for b in bouquets:
+    # Отправляем 3 букета
+    for i in range(3):
+        bouquet = db.get_random_bouquet()
+        if not bouquet:
+            continue
+        
+        # Генерируем название и описание через Gemini
+        status_msg = await message.answer(f"✨ Генерирую описание для букета {i+1}...")
+        
+        name, description = await generate_bouquet_info(bouquet['photo_file_id'])
+        
+        await status_msg.delete()
+        
+        # Сохраняем в данные пользователя
+        user_data[user_id] = user_data.get(user_id, {})
+        user_data[user_id][f'b_name_{i}'] = name
+        user_data[user_id][f'b_desc_{i}'] = description
+        user_data[user_id][f'b_id_{i}'] = bouquet['id']
+        
+        # Создаём кнопку
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="✅ Выбрать этот букет", callback_data=f"select_{b['id']}")]
+            [InlineKeyboardButton(text="✅ Выбрать этот букет", callback_data=f"select_{i}")]
         ])
         
-        caption = f"🌸 {b['name'] or 'Букет'}\n"
-        if b.get('price'):
-            caption += f"💰 Цена: {b['price']} ₽\n"
-        if b.get('description'):
-            caption += f"📝 {b['description']}"
+        # Отправляем фото с названием и описанием
+        caption = f"🌸 **{name}**\n\n{description}"
         
         await message.answer_photo(
-            photo=b['photo_file_id'],
+            photo=bouquet['photo_file_id'],
             caption=caption,
-            reply_markup=keyboard
+            reply_markup=keyboard,
+            parse_mode='Markdown'
         )
 
 @dp.callback_query(F.data.startswith('select_'))
 async def select_bouquet(callback: types.CallbackQuery):
-    bouquet_id = int(callback.data.split('_')[1])
+    """Обработка выбора букета"""
+    index = int(callback.data.split('_')[1])
     user_id = callback.from_user.id
     
+    # Получаем данные выбранного букета
+    name = user_data.get(user_id, {}).get(f'b_name_{index}', "Выбранный букет")
+    desc = user_data.get(user_id, {}).get(f'b_desc_{index}', "")
+    bouquet_id = user_data.get(user_id, {}).get(f'b_id_{index}')
+    
+    # Сохраняем в заказ
     user_data[user_id] = user_data.get(user_id, {})
+    user_data[user_id]['product'] = name
+    user_data[user_id]['product_description'] = desc
+    user_data[user_id]['product_source'] = 'catalog_ai'
     user_data[user_id]['selected_bouquet_id'] = bouquet_id
-    user_data[user_id]['product_source'] = 'catalog'
     
     await callback.message.answer(
-        "✅ Букет выбран! Теперь продолжим оформление заказа.\n\n"
-        "📝 Напишите ваше имя:"
+        f"✅ Вы выбрали: **{name}**\n\n"
+        f"📝 Теперь напишите ваше имя:",
+        parse_mode='Markdown'
     )
     user_states[user_id] = STATE_WAITING_CLIENT_NAME
     await callback.answer()
 
 # ============================================
-# МОДУЛЬ 2: ДНИ РОЖДЕНИЯ
+# МОДУЛЬ: ДНИ РОЖДЕНИЯ
 # ============================================
 @dp.message(F.text == "🎂 Сохранить день рождения")
 async def birthday_start(message: types.Message):
@@ -247,7 +398,7 @@ async def handle_birthday_input(message: types.Message):
         )
 
 # ============================================
-# МОДУЛЬ 3: ПОДПИСКА
+# МОДУЛЬ: ЦВЕТОЧНАЯ ПОДПИСКА
 # ============================================
 @dp.message(F.text == "📦 Цветочная подписка")
 async def subscription_start(message: types.Message):
@@ -259,9 +410,6 @@ async def subscription_start(message: types.Message):
     await message.answer(
         "🌸 **Цветочная подписка**\n\n"
         "Регулярные букеты для ваших близких без лишних забот.\n\n"
-        "**Варианты:**\n"
-        "• **С напоминанием** — я напомню, вы подтвердите\n"
-        "• **Автоматическая** — заказ оформляется сам, деньги списываются\n\n"
         "Выберите действие:",
         reply_markup=keyboard,
         parse_mode='Markdown'
@@ -275,7 +423,7 @@ async def subscription_new(callback: types.CallbackQuery):
     
     await callback.message.edit_text(
         "📦 **Оформление подписки**\n\n"
-        "**Шаг 1 из 6**\n"
+        "**Шаг 1 из 5**\n"
         "Кому вы хотите отправлять цветы? Введите имя получателя:"
     )
     await callback.answer()
@@ -285,46 +433,15 @@ async def subscription_info(callback: types.CallbackQuery):
     text = (
         "🌸 **Как работает подписка**\n\n"
         "1. Вы указываете получателя и бюджет\n"
-        "2. Выбираете частоту (раз в неделю/месяц)\n"
-        "3. Выбираете режим:\n"
-        "   • **С напоминанием** — я пришлю уведомление, вы подтвердите\n"
-        "   • **Автоматическая** — заказ оформляется сам\n"
-        "4. В указанный день я создаю заказ и передаю флористу\n\n"
-        "Управлять подписками можно в разделе «Мои подписки»"
+        "2. Выбираете частоту\n"
+        "3. В указанный день я напомню о заказе"
     )
     await callback.message.answer(text)
     await callback.answer()
 
 # ============================================
-# КОМАНДА START (ЕДИНСТВЕННАЯ, ИСПРАВЛЕННАЯ)
+# ОСТАЛЬНЫЕ ОБРАБОТЧИКИ (ЗАКАЗ)
 # ============================================
-@dp.message(Command("start"))
-async def cmd_start(message: types.Message):
-    user_id = message.from_user.id
-    user_states[user_id] = STATE_IDLE
-    user_data[user_id] = {}
-    
-    args = message.text.split()
-    if len(args) > 1 and args[1].startswith('product_'):
-        parts = args[1].split('_')
-        product_name = 'Букет'
-        if len(parts) >= 3:
-            product_name = ' '.join(parts[2:]).replace('%20', ' ')
-        
-        user_data[user_id]['product'] = product_name
-        user_states[user_id] = STATE_WAITING_CLIENT_PHONE
-        await message.answer(
-            f"✅ Вы выбрали: {product_name}\n\n📱 Теперь отправьте ваш номер телефона:",
-            reply_markup=client_phone_keyboard
-        )
-    else:
-        await message.answer(
-            "🌸 Добро пожаловать в «Цветник»!\n\n"
-            "Я помогу быстро заказать букет с доставкой по Новосибирску.\n\n"
-            "👇 Выберите действие в меню ниже",
-            reply_markup=main_keyboard
-        )
-
 @dp.message(F.text == "🛒 Оформить заказ")
 async def order_start(message: types.Message):
     user_id = message.from_user.id
@@ -370,20 +487,6 @@ async def about(message: types.Message):
         disable_web_page_preview=True
     )
 
-@dp.message(F.photo)
-async def handle_photo(message: types.Message):
-    user_id = message.from_user.id
-    if user_states.get(user_id) != STATE_WAITING_PRODUCT:
-        return
-    
-    photo = message.photo[-1]
-    user_data[user_id]['product'] = "Фото букета"
-    user_data[user_id]['photo'] = photo.file_id
-    user_data[user_id]['product_source'] = 'photo'
-    user_states[user_id] = STATE_WAITING_CLIENT_NAME
-    
-    await message.answer("✅ Фото получено!\n\n📝 Напишите ваше имя:")
-
 @dp.message(F.contact)
 async def handle_client_phone(message: types.Message):
     user_id = message.from_user.id
@@ -394,20 +497,21 @@ async def handle_client_phone(message: types.Message):
     user_states[user_id] = STATE_WAITING_ADDRESS
     
     await message.answer(
-        "✅ Номер получен!\n\n📝 Напишите адрес доставки и желаемое время:\n"
+        "✅ Номер получен!\n\n"
+        "📝 Напишите адрес доставки и желаемое время:\n"
         "Например: ул. Некрасова, 41, кв. 5, сегодня к 18:00",
         reply_markup=ReplyKeyboardRemove()
     )
 
 # ============================================
-# ОБРАБОТКА ТЕКСТА (ЗАКАЗ)
+# ОБРАБОТКА ТЕКСТА
 # ============================================
 @dp.message(F.text)
 async def handle_text(message: types.Message):
     user_id = message.from_user.id
     text = message.text
     
-    # Проверяем главные кнопки
+    # Пропускаем главные кнопки
     if text in ["🛒 Оформить заказ", "🌸 Выбрать букет из каталога", 
                 "🎂 Сохранить день рождения", "📦 Цветочная подписка",
                 "📞 Связаться с флористом", "ℹ️ О нас"]:
@@ -419,71 +523,74 @@ async def handle_text(message: types.Message):
     if state == STATE_SUB_RECIPIENT:
         user_data[user_id]['sub_recipient'] = text
         user_states[user_id] = STATE_SUB_PHONE
-        await message.answer(
-            "📞 **Шаг 2 из 6**\n"
-            "Введите телефон получателя (или отправьте /skip если не хотите указывать):"
-        )
+        await message.answer("📞 **Шаг 2 из 5**\nВведите телефон получателя:")
         return
     
     if state == STATE_SUB_PHONE:
-        if text != '/skip':
-            user_data[user_id]['sub_phone'] = text
+        user_data[user_id]['sub_phone'] = text
         user_states[user_id] = STATE_SUB_ADDRESS
-        await message.answer(
-            "📍 **Шаг 3 из 6**\n"
-            "Введите адрес получателя (или /skip если не хотите указывать):"
-        )
+        await message.answer("📍 **Шаг 3 из 5**\nВведите адрес получателя:")
         return
     
     if state == STATE_SUB_ADDRESS:
-        if text != '/skip':
-            user_data[user_id]['sub_address'] = text
+        user_data[user_id]['sub_address'] = text
         user_states[user_id] = STATE_SUB_FREQUENCY
-        
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="Раз в неделю", callback_data="freq_weekly")],
-            [InlineKeyboardButton(text="Раз в месяц", callback_data="freq_monthly")],
-            [InlineKeyboardButton(text="Каждое 8 число", callback_data="freq_custom")]
-        ])
-        await message.answer(
-            "📅 **Шаг 4 из 6**\n"
-            "Как часто отправлять букеты?",
-            reply_markup=keyboard
-        )
+        await message.answer("📅 **Шаг 4 из 5**\nКак часто отправлять? (раз в месяц/неделю)")
+        return
+    
+    if state == STATE_SUB_FREQUENCY:
+        user_data[user_id]['sub_frequency'] = text
+        user_states[user_id] = STATE_SUB_BUDGET
+        await message.answer("💰 **Шаг 5 из 5**\nКакой бюджет на один букет? (в рублях)")
         return
     
     if state == STATE_SUB_BUDGET:
         try:
             budget = int(text.replace('₽', '').replace(' ', ''))
             user_data[user_id]['sub_budget'] = budget
-            user_states[user_id] = STATE_SUB_CONFIRM
             
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="✅ С напоминанием", callback_data="confirm_remind")],
-                [InlineKeyboardButton(text="🤖 Автоматическая", callback_data="confirm_auto")]
-            ])
-            await message.answer(
-                "🔄 **Шаг 6 из 6**\n"
-                "Выберите режим подписки:",
-                reply_markup=keyboard
-            )
-        except:
+            # Сохраняем подписку
+            sub_data = {
+                'user_id': user_id,
+                'recipient_name': user_data[user_id].get('sub_recipient', ''),
+                'recipient_phone': user_data[user_id].get('sub_phone', ''),
+                'recipient_address': user_data[user_id].get('sub_address', ''),
+                'frequency': user_data[user_id].get('sub_frequency', ''),
+                'budget': budget,
+                'auto_confirm': 0,
+                'next_date': (datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d')
+            }
+            
+            sub_id = db.add_subscription(sub_data)
+            
+            if sub_id:
+                await message.answer(
+                    "✅ **Подписка оформлена!**\n\n"
+                    f"Получатель: {sub_data['recipient_name']}\n"
+                    f"Бюджет: {budget} ₽",
+                    reply_markup=main_keyboard
+                )
+            else:
+                await message.answer("❌ Ошибка при оформлении подписки")
+            
+            user_states[user_id] = STATE_IDLE
+            
+        except Exception as e:
             await message.answer("❌ Введите число (например: 3000)")
         return
     
-    # Шаги заказа (остальные)
+    # Шаги заказа
     if state == STATE_WAITING_PRODUCT:
         user_data[user_id]['product'] = text
-        user_data[user_id]['product_source'] = 'text'
         user_states[user_id] = STATE_WAITING_CLIENT_NAME
-        await message.answer(f"✅ Вы выбрали: {text}\n\n📝 Напишите ваше имя:")
+        await message.answer("📝 Напишите ваше имя:")
         return
     
     if state == STATE_WAITING_CLIENT_NAME:
         user_data[user_id]['client_name'] = text
         user_states[user_id] = STATE_WAITING_CLIENT_PHONE
         await message.answer(
-            f"✅ Имя записано: {text}\n\n📱 Отправьте ваш номер телефона:",
+            f"✅ Имя записано!\n\n📱 Отправьте ваш номер телефона:",
             reply_markup=client_phone_keyboard
         )
         return
@@ -491,17 +598,15 @@ async def handle_text(message: types.Message):
     if state == STATE_WAITING_ADDRESS:
         user_data[user_id]['address'] = text
         user_states[user_id] = STATE_WAITING_RECIPIENT_NAME
-        await message.answer(
-            "✅ Адрес записан.\n\n👤 Напишите имя получателя:",
-            reply_markup=ReplyKeyboardRemove()
-        )
+        await message.answer("👤 Напишите имя получателя:")
         return
     
     if state == STATE_WAITING_RECIPIENT_NAME:
         user_data[user_id]['recipient_name'] = text
         user_states[user_id] = STATE_WAITING_RECIPIENT_PHONE
         await message.answer(
-            f"✅ Имя получателя: {text}\n\n📱 Выберите вариант для телефона получателя:",
+            f"✅ Имя получателя: {text}\n\n"
+            f"📱 Выберите вариант для телефона получателя:",
             reply_markup=recipient_phone_keyboard
         )
         return
@@ -511,22 +616,19 @@ async def handle_text(message: types.Message):
             user_data[user_id]['recipient_phone'] = user_data[user_id]['client_phone']
             user_states[user_id] = STATE_WAITING_CARD_TEXT
             await message.answer(
-                "✅ Телефон совпадает.\n\n💌 Напишите текст для открытки (или пропустите):",
+                "💌 Напишите текст для открытки (или пропустите):",
                 reply_markup=card_keyboard
             )
         elif text == "✏️ Ввести другой номер":
             user_states[user_id] = STATE_WAITING_RECIPIENT_PHONE_INPUT
-            await message.answer(
-                "📱 Введите номер телефона получателя:",
-                reply_markup=ReplyKeyboardRemove()
-            )
+            await message.answer("📱 Введите номер телефона получателя:")
         return
     
     if state == STATE_WAITING_RECIPIENT_PHONE_INPUT:
         user_data[user_id]['recipient_phone'] = text
         user_states[user_id] = STATE_WAITING_CARD_TEXT
         await message.answer(
-            f"✅ Телефон получателя: {text}\n\n💌 Напишите текст для открытки (или пропустите):",
+            "💌 Напишите текст для открытки (или пропустите):",
             reply_markup=card_keyboard
         )
         return
@@ -538,7 +640,7 @@ async def handle_text(message: types.Message):
             user_data[user_id]['card_text'] = text
         user_states[user_id] = STATE_WAITING_BRANCH
         await message.answer(
-            "✅ Данные сохранены.\n\n📍 Выберите удобный филиал:",
+            "📍 Выберите удобный филиал:",
             reply_markup=branch_keyboard
         )
         return
@@ -559,64 +661,13 @@ async def handle_text(message: types.Message):
                 f"👤 Получатель: {user_data[user_id]['recipient_name']}\n"
                 f"📍 Адрес: {user_data[user_id]['address']}\n"
                 f"🏢 {branch_map[text]}\n"
-                f"💌 Открытка: {user_data[user_id].get('card_text', 'Без открытки')}\n\n"
-                f"Флорист начал сборку.",
+                f"💌 Открытка: {user_data[user_id].get('card_text', 'Без открытки')}",
                 parse_mode='Markdown',
                 reply_markup=main_keyboard
             )
             user_states[user_id] = STATE_IDLE
         else:
             await message.answer("Пожалуйста, выберите вариант из меню:")
-
-@dp.callback_query(F.data.startswith('freq_'))
-async def subscription_frequency(callback: types.CallbackQuery):
-    user_id = callback.from_user.id
-    freq = callback.data.split('_')[1]
-    
-    user_data[user_id]['sub_frequency'] = freq
-    user_states[user_id] = STATE_SUB_BUDGET
-    
-    await callback.message.edit_text(
-        "💰 **Шаг 5 из 6**\n"
-        "Какой бюджет на один букет? (в рублях)\n"
-        "Например: 3000"
-    )
-    await callback.answer()
-
-@dp.callback_query(F.data.startswith('confirm_'))
-async def subscription_confirm(callback: types.CallbackQuery):
-    user_id = callback.from_user.id
-    mode = callback.data.split('_')[1]
-    
-    data = user_data.get(user_id, {})
-    
-    sub_data = {
-        'user_id': user_id,
-        'recipient_name': data.get('sub_recipient', ''),
-        'recipient_phone': data.get('sub_phone', ''),
-        'recipient_address': data.get('sub_address', ''),
-        'frequency': data.get('sub_frequency', 'monthly'),
-        'budget': data.get('sub_budget', 0),
-        'auto_confirm': 1 if mode == 'auto' else 0,
-        'next_date': (datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d')
-    }
-    
-    sub_id = db.add_subscription(sub_data)
-    
-    if sub_id:
-        await callback.message.edit_text(
-            "✅ **Подписка оформлена!**\n\n"
-            f"Получатель: {sub_data['recipient_name']}\n"
-            f"Бюджет: {sub_data['budget']} ₽\n"
-            f"Режим: {'Автоматический' if mode == 'auto' else 'С напоминанием'}\n\n"
-            f"Следующая отправка: примерно {sub_data['next_date']}\n\n"
-            "Управлять подпиской можно в разделе «Мои подписки»"
-        )
-    else:
-        await callback.message.edit_text("❌ Ошибка при оформлении подписки")
-    
-    user_states[user_id] = STATE_IDLE
-    await callback.answer()
 
 # ============================================
 # ОТПРАВКА ЗАКАЗА ФЛОРИСТАМ
@@ -626,8 +677,7 @@ async def send_order_to_florist(message: types.Message, user_id: int):
     username = message.from_user.username or "Нет username"
     
     product_info = user_data[user_id]['product']
-    if user_data[user_id].get('product_source') == 'photo':
-        product_info = "📸 [Фото букета]"
+    product_desc = user_data[user_id].get('product_description', '')
     
     order_text = (
         f"🌸 НОВЫЙ ЗАКАЗ 🌸\n\n"
@@ -637,14 +687,13 @@ async def send_order_to_florist(message: types.Message, user_id: int):
         f"📱 Телефон получателя: {user_data[user_id].get('recipient_phone', 'Не указано')}\n"
         f"📍 Адрес: {user_data[user_id]['address']}\n"
         f"🌸 Букет: {product_info}\n"
+        f"📝 Описание: {product_desc}\n"
     )
     
-    if user_data[user_id].get('price'):
-        order_text += f"💰 Цена: {user_data[user_id]['price']} ₽\n"
     if user_data[user_id].get('card_text'):
         order_text += f"💌 Открытка: {user_data[user_id]['card_text']}\n"
     
-    order_text += f"🏢 Филиал: {user_data[user_id]['branch']}\n🆔 @{username}\n\n⚡️ Собирайте!"
+    order_text += f"🏢 Филиал: {user_data[user_id]['branch']}\n🆔 @{username}"
 
     branch = user_data[user_id]['branch']
     admin_id = 7651760894
@@ -652,9 +701,6 @@ async def send_order_to_florist(message: types.Message, user_id: int):
     # Администратору
     try:
         await bot.send_message(chat_id=admin_id, text=order_text)
-        if user_data[user_id].get('photo'):
-            await bot.send_photo(chat_id=admin_id, photo=user_data[user_id]['photo'],
-                                 caption="📸 Фото букета к заказу")
         logger.info(f"✅ Администратору {admin_id}")
     except Exception as e:
         logger.error(f"❌ Ошибка админу: {e}")
@@ -664,8 +710,6 @@ async def send_order_to_florist(message: types.Message, user_id: int):
         for name, info in BRANCHES.items():
             try:
                 await bot.send_message(chat_id=info['id'], text=order_text)
-                if user_data[user_id].get('photo'):
-                    await bot.send_photo(chat_id=info['id'], photo=user_data[user_id]['photo'])
                 logger.info(f"✅ {name}")
             except Exception as e:
                 logger.error(f"❌ {name}: {e}")
@@ -673,8 +717,6 @@ async def send_order_to_florist(message: types.Message, user_id: int):
         florist_id = BRANCHES[branch]['id']
         try:
             await bot.send_message(chat_id=florist_id, text=order_text)
-            if user_data[user_id].get('photo'):
-                await bot.send_photo(chat_id=florist_id, photo=user_data[user_id]['photo'])
             logger.info(f"✅ {branch}")
         except Exception as e:
             logger.error(f"❌ {branch}: {e}")
@@ -683,42 +725,38 @@ async def send_order_to_florist(message: types.Message, user_id: int):
 # ЕЖЕДНЕВНАЯ ПРОВЕРКА ДНЕЙ РОЖДЕНИЯ
 # ============================================
 async def check_birthdays():
+    """Проверяет дни рождения за 3 дня вперёд"""
     today = datetime.now()
     target_date = (today + timedelta(days=3)).strftime('%m-%d')
     
     birthdays = db.get_birthdays_by_date(target_date)
-    logger.info(f"🔍 Проверка дней рождения: {target_date}, найдено: {len(birthdays)}")
     
     for bday in birthdays:
         user_id = bday['user_id']
         recipient = bday['recipient_name']
-        promo = f"BDAY{bday['id']}10"
         
         text = (
             f"🌸 **Через 3 дня день рождения {recipient}!**\n\n"
             f"Мы помним об этом ❤️\n\n"
-            f"В честь этого события для вас **персональная скидка 10%** на любой букет.\n"
-            f"Промокод: `{promo}`\n\n"
-            f"Скажите этот код флористу при оформлении заказа!"
+            f"В честь этого события для вас **персональная скидка 10%** на любой букет!"
         )
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🎁 Выбрать букет", callback_data="start_order")],
-            [InlineKeyboardButton(text="⏰ Напомнить позже", callback_data="remind_later")]
+            [InlineKeyboardButton(text="🎁 Выбрать букет", callback_data="catalog_start")]
         ])
         
         try:
             await bot.send_message(user_id, text, reply_markup=keyboard, parse_mode='Markdown')
-            logger.info(f"✅ Напоминание отправлено пользователю {user_id} про {recipient}")
+            logger.info(f"✅ Напоминание отправлено пользователю {user_id}")
         except Exception as e:
-            logger.error(f"❌ Ошибка отправки напоминания {user_id}: {e}")
+            logger.error(f"❌ Ошибка отправки напоминания: {e}")
 
 # ============================================
 # ПЛАНИРОВЩИК
 # ============================================
 async def scheduler():
     while True:
-        await asyncio.sleep(3600)
+        await asyncio.sleep(3600)  # каждый час
         await check_birthdays()
 
 # ============================================
