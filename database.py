@@ -7,27 +7,16 @@ logger = logging.getLogger(__name__)
 
 class Database:
     def __init__(self, db_path='data/database.sqlite'):
-        # Создаем папку data, если её нет
+        # Создаем папки
         os.makedirs('data/photos', exist_ok=True)
+        os.makedirs('data/bouquets', exist_ok=True)
         
         self.conn = sqlite3.connect(db_path)
         self.cursor = self.conn.cursor()
         self._create_tables()
     
     def _create_tables(self):
-        # Основная таблица для фото (оставляем как есть)
-        self.cursor.execute('''
-            CREATE TABLE IF NOT EXISTS photos (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                file_id TEXT UNIQUE,
-                file_path TEXT,
-                posted INTEGER DEFAULT 0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                posted_at TIMESTAMP
-            )
-        ''')
-        
-        # Новая таблица для букетов (ваша база для выбора)
+        # Таблица для букетов (каталог)
         self.cursor.execute('''
             CREATE TABLE IF NOT EXISTS bouquets (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -35,8 +24,6 @@ class Database:
                 description TEXT,
                 photo_file_id TEXT UNIQUE NOT NULL,
                 photo_path TEXT,
-                price INTEGER DEFAULT 0,
-                category TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
@@ -47,7 +34,7 @@ class Database:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
                 recipient_name TEXT NOT NULL,
-                birth_date TEXT NOT NULL,  -- формат MM-DD
+                birth_date TEXT NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
@@ -60,7 +47,7 @@ class Database:
                 recipient_name TEXT NOT NULL,
                 recipient_phone TEXT,
                 recipient_address TEXT,
-                frequency TEXT NOT NULL,  -- 'weekly', 'monthly'
+                frequency TEXT NOT NULL,
                 custom_day INTEGER,
                 budget INTEGER NOT NULL,
                 auto_confirm INTEGER DEFAULT 0,
@@ -74,11 +61,12 @@ class Database:
         logger.info("✅ Все таблицы созданы")
     
     # ========== МЕТОДЫ ДЛЯ БУКЕТОВ ==========
-    def add_bouquet(self, file_id, file_path, name=None, price=0, category=None):
+    def add_bouquet(self, file_id, file_path, name=None):
+        """Добавляет букет в каталог"""
         try:
             self.cursor.execute(
-                'INSERT OR IGNORE INTO bouquets (photo_file_id, photo_path, name, price, category) VALUES (?, ?, ?, ?, ?)',
-                (file_id, file_path, name, price, category)
+                'INSERT OR IGNORE INTO bouquets (photo_file_id, photo_path, name) VALUES (?, ?, ?)',
+                (file_id, file_path, name or "Букет")
             )
             self.conn.commit()
             return True
@@ -87,6 +75,7 @@ class Database:
             return False
     
     def get_random_bouquet(self):
+        """Возвращает случайный букет из каталога"""
         self.cursor.execute('SELECT * FROM bouquets ORDER BY RANDOM() LIMIT 1')
         row = self.cursor.fetchone()
         if row:
@@ -95,23 +84,28 @@ class Database:
                 'name': row[1],
                 'description': row[2],
                 'photo_file_id': row[3],
-                'photo_path': row[4],
-                'price': row[5],
-                'category': row[6]
+                'photo_path': row[4]
             }
         return None
     
-    def get_bouquets_by_category(self, category, limit=5):
-        self.cursor.execute(
-            'SELECT * FROM bouquets WHERE category = ? ORDER BY RANDOM() LIMIT ?',
-            (category, limit)
-        )
-        rows = self.cursor.fetchall()
-        return [{
-            'id': r[0], 'name': r[1], 'description': r[2],
-            'photo_file_id': r[3], 'photo_path': r[4],
-            'price': r[5], 'category': r[6]
-        } for r in rows]
+    def get_bouquet_by_id(self, bouquet_id):
+        """Возвращает букет по ID"""
+        self.cursor.execute('SELECT * FROM bouquets WHERE id = ?', (bouquet_id,))
+        row = self.cursor.fetchone()
+        if row:
+            return {
+                'id': row[0],
+                'name': row[1],
+                'description': row[2],
+                'photo_file_id': row[3],
+                'photo_path': row[4]
+            }
+        return None
+    
+    def get_bouquets_count(self):
+        """Возвращает количество букетов в каталоге"""
+        self.cursor.execute('SELECT COUNT(*) FROM bouquets')
+        return self.cursor.fetchone()[0]
     
     # ========== МЕТОДЫ ДЛЯ ДНЕЙ РОЖДЕНИЯ ==========
     def add_birthday(self, user_id, recipient_name, birth_date):
@@ -135,17 +129,6 @@ class Database:
         return [{
             'id': r[0], 'user_id': r[1],
             'recipient_name': r[2], 'birth_date': r[3]
-        } for r in rows]
-    
-    def get_user_birthdays(self, user_id):
-        self.cursor.execute(
-            'SELECT * FROM birthdays WHERE user_id = ?',
-            (user_id,)
-        )
-        rows = self.cursor.fetchall()
-        return [{
-            'id': r[0], 'recipient_name': r[2],
-            'birth_date': r[3]
         } for r in rows]
     
     # ========== МЕТОДЫ ДЛЯ ПОДПИСОК ==========
@@ -182,54 +165,6 @@ class Database:
             'frequency': r[5], 'custom_day': r[6], 'budget': r[7],
             'auto_confirm': r[8], 'active': r[9], 'next_date': r[10]
         } for r in rows]
-    
-    def update_subscription_next_date(self, sub_id, next_date):
-        self.cursor.execute(
-            'UPDATE subscriptions SET next_date = ? WHERE id = ?',
-            (next_date, sub_id)
-        )
-        self.conn.commit()
-    
-    # ========== СТАРЫЕ МЕТОДЫ (ДЛЯ ФОТО) ==========
-    def add_photo(self, file_id, file_path):
-        try:
-            self.cursor.execute(
-                'INSERT OR IGNORE INTO photos (file_id, file_path) VALUES (?, ?)',
-                (file_id, file_path)
-            )
-            self.conn.commit()
-            return True
-        except Exception as e:
-            logger.error(f"Ошибка добавления фото: {e}")
-            return False
-    
-    def get_random_unposted_photo(self):
-        self.cursor.execute(
-            'SELECT id, file_id, file_path FROM photos WHERE posted = 0 ORDER BY RANDOM() LIMIT 1'
-        )
-        row = self.cursor.fetchone()
-        if row:
-            return {'id': row[0], 'file_id': row[1], 'file_path': row[2]}
-        return None
-    
-    def mark_as_posted(self, photo_id):
-        self.cursor.execute(
-            'UPDATE photos SET posted = 1, posted_at = CURRENT_TIMESTAMP WHERE id = ?',
-            (photo_id,)
-        )
-        self.conn.commit()
-    
-    def get_stats(self):
-        self.cursor.execute('SELECT COUNT(*) FROM photos')
-        total = self.cursor.fetchone()[0]
-        self.cursor.execute('SELECT COUNT(*) FROM photos WHERE posted = 1')
-        posted = self.cursor.fetchone()[0]
-        return {'total': total, 'posted': posted, 'pending': total - posted}
-    
-    def reset_all_photos(self):
-        self.cursor.execute('UPDATE photos SET posted = 0')
-        self.conn.commit()
-        logger.info("🔄 Все фото сброшены")
     
     def close(self):
         self.conn.close()
