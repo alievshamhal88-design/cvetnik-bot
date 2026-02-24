@@ -60,18 +60,25 @@ class YandexGPTClient:
 
     def _prepare_image(self, image_bytes: bytes) -> str:
         """Подготавливает изображение для отправки"""
-        image = Image.open(BytesIO(image_bytes))
-        if image.mode != 'RGB':
-            image = image.convert('RGB')
-        buffer = BytesIO()
-        image.save(buffer, format='JPEG', quality=85)
-        buffer.seek(0)
-        return base64.b64encode(buffer.read()).decode()
+        try:
+            image = Image.open(BytesIO(image_bytes))
+            if image.mode != 'RGB':
+                image = image.convert('RGB')
+            buffer = BytesIO()
+            image.save(buffer, format='JPEG', quality=85)
+            buffer.seek(0)
+            return base64.b64encode(buffer.read()).decode()
+        except Exception as e:
+            logger.error(f"❌ Ошибка подготовки изображения: {e}")
+            return None
 
     def generate_bouquet_info(self, image_bytes: bytes) -> Optional[Tuple[str, str]]:
         """Генерирует название и описание букета по фото"""
         try:
+            # Подготавливаем изображение
             image_base64 = self._prepare_image(image_bytes)
+            if not image_base64:
+                return None
 
             headers = {
                 "Authorization": f"Api-Key {self.api_key}",
