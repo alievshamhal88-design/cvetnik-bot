@@ -150,21 +150,5 @@ class Database:
             logger.error(f"Ошибка добавления подписки: {e}")
             return None
     
-    def get_active_subscriptions(self, date=None):
-        query = 'SELECT * FROM subscriptions WHERE active = 1'
-        params = []
-        if date:
-            query += ' AND next_date = ?'
-            params.append(date)
-        
-        self.cursor.execute(query, params)
-        rows = self.cursor.fetchall()
-        return [{
-            'id': r[0], 'user_id': r[1], 'recipient_name': r[2],
-            'recipient_phone': r[3], 'recipient_address': r[4],
-            'frequency': r[5], 'custom_day': r[6], 'budget': r[7],
-            'auto_confirm': r[8], 'active': r[9], 'next_date': r[10]
-        } for r in rows]
-    
     def close(self):
         self.conn.close()
