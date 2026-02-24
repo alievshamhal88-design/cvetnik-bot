@@ -357,6 +357,7 @@ async def select_bouquet(callback: types.CallbackQuery):
 async def birthday_start(message: types.Message):
     await message.answer(
         "🎂 **Сохраним день рождения вашего близкого!**\n\n"
+        "➕ **И получите персональную скидку 10%** на заказ в этот день!\n\n"
         "Введите дату и имя в формате:\n"
         "`ДД.ММ имя`\n\n"
         "Например: `15.05 мама` или `23.02 папа`",
