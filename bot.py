@@ -293,6 +293,17 @@ async def subscription_info(callback: types.CallbackQuery):
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     user_id = message.from_user.id
+    logger.info(f"🖥️ Команда /start от пользователя {user_id}")
+    
+    # Просто отвечаем приветствием
+    await message.answer(
+        "🌸 Добро пожаловать в «Цветник»!\n\n"
+        "Я помогу быстро заказать букет с доставкой по Новосибирску.\n\n"
+        "👇 Выберите действие в меню ниже",
+        reply_markup=main_keyboard
+    )
+async def cmd_start(message: types.Message):
+    user_id = message.from_user.id
     user_states[user_id] = STATE_IDLE
     user_data[user_id] = {}
     
