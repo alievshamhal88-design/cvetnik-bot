@@ -43,12 +43,20 @@ dp = Dispatcher()
 db = Database()
 
 # ============================================
-# ТЕСТОВЫЙ ОБРАБОТЧИК (ВРЕМЕННО)
+# КОМАНДА START (УПРОЩЁННАЯ ВЕРСИЯ)
 # ============================================
-@dp.message(Command("test"))
-async def test_handler(message: types.Message):
-    await message.answer(f"✅ Тест работает! Ваш ID: {message.from_user.id}")
-
+@dp.message(Command("start"))
+async def cmd_start(message: types.Message):
+    user_id = message.from_user.id
+    user_states[user_id] = STATE_IDLE
+    user_data[user_id] = {}
+    
+    await message.answer(
+        "🌸 Добро пожаловать в «Цветник»!\n\n"
+        "Я помогу быстро заказать букет с доставкой по Новосибирску.\n\n"
+        "👇 Выберите действие в меню ниже",
+        reply_markup=main_keyboard
+    )
 # ============================================
 # СОСТОЯНИЯ
 # ============================================
