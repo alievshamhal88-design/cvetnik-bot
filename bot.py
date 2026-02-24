@@ -183,19 +183,28 @@ async def cmd_start(message: types.Message):
         reply_markup=main_keyboard
     )
 
-@dp.message(Command("test"))
-async def test_handler(message: types.Message):
-    await message.answer(f"✅ Тест работает! Ваш ID: {message.from_user.id}")
-
 @dp.message(Command("test_yandex"))
 async def test_yandex(message: types.Message):
-    """Тест YandexGPT без фото"""
+    """Максимально простой тест"""
     try:
+        # Проверяем, что ключи вообще существуют
+        folder_id = os.getenv("YANDEX_FOLDER_ID")
+        api_key = os.getenv("YANDEX_API_KEY")
+        
+        if not folder_id or not api_key:
+            await message.answer("❌ Отсутствуют переменные окружения")
+            return
+            
+        await message.answer(f"🔄 Использую Folder ID: {folder_id[:5]}...")
+        
+        # Выполняем тест
         result = yandex_gpt.generate_test()
+        
         if result:
-            await message.answer(f"✅ YandexGPT ответил:\n{result}")
+            await message.answer(f"✅ Успех! Ответ: {result}")
         else:
-            await message.answer("❌ YandexGPT не ответил")
+            await message.answer("❌ Не удалось получить ответ от API")
+            
     except Exception as e:
         await message.answer(f"❌ Ошибка: {e}")
 
