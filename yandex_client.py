@@ -30,7 +30,66 @@ class YandexGPTClient:
         buffer.seek(0)
         return base64.b64encode(buffer.read()).decode()
 
-    def generate_bouquet_info(self, image_bytes: bytes) -> Optional[Tuple[str, str]]:
+def generate_bouquet_info(self, image_bytes: bytes) -> Optional[Tuple[str, str]]:
+    """
+    Временно генерируем название без анализа фото
+    """
+    try:
+        payload = {
+            "modelUri": f"gpt://{self.folder_id}/yandexgpt-lite",
+            "completionOptions": {
+                "stream": False,
+                "temperature": 0.7,
+                "maxTokens": "500"
+            },
+            "messages": [
+                {
+                    "role": "user",
+                    "text": (
+                        "Придумай красивое название для букета цветов и короткое описание. "
+                        "Формат ответа:\nНазвание: ...\nОписание: ..."
+                    )
+                }
+            ]
+        }
+
+        headers = {
+            "Authorization": f"Api-Key {self.api_key}",
+            "Content-Type": "application/json"
+        }
+
+        logger.info("🔄 Отправляю запрос к YandexGPT...")
+        response = requests.post(
+            self.api_url,
+            headers=headers,
+            json=payload,
+            timeout=60
+        )
+
+        if response.status_code == 200:
+            result = response.json()
+            text = result['result']['alternatives'][0]['message']['text']
+            
+            # Парсим ответ
+            lines = text.split('\n')
+            name = "Волшебный букет"
+            description = "Нежный букет для особенного случая."
+
+            for line in lines:
+                if 'Название:' in line:
+                    name = line.replace('Название:', '').strip()
+                elif 'Описание:' in line:
+                    description = line.replace('Описание:', '').strip()
+
+            logger.info(f"✅ YandexGPT сгенерировал: {name}")
+            return name, description
+        else:
+            logger.error(f"❌ Ошибка YandexGPT: {response.status_code} - {response.text}")
+            return None
+
+    except Exception as e:
+        logger.error(f"❌ Исключение: {e}")
+        return None
         """Генерирует название и описание букета по фото"""
         try:
             image_base64 = self._prepare_image(image_bytes)
