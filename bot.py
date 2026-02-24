@@ -23,11 +23,9 @@ from yandex_client import YandexGPTClient
 # ============================================
 API_TOKEN = "8462470094:AAHSlSA20IvbGG2AMOBDL9qk3eqXakzuwWg"
 
-# ============================================
-# ИНИЦИАЛИЗАЦИЯ YANDEXGPT
-# ============================================
+# Инициализация YandexGPT
 try:
-    yandex_gpt = YandexGPTClient()  # Без параметров, сам возьмёт из окружения
+    yandex_gpt = YandexGPTClient()
     logger.info("✅ YandexGPT клиент создан")
 except ValueError as e:
     logger.error(f"❌ Ошибка создания YandexGPT клиента: {e}")
