@@ -1,3 +1,5 @@
+import os
+
 # ID администраторов
 ADMIN_IDS = [
     7651760894,  # @cvetnik1_sib
