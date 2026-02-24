@@ -215,6 +215,48 @@ async def test_handler(message: types.Message):
     await message.answer(f"✅ Тест работает! Ваш ID: {message.from_user.id}")
 
 # ============================================
+# ЗАГРУЗКА ФОТО АДМИНИСТРАТОРОМ
+# ============================================
+@dp.message(F.photo)
+async def handle_admin_photo(message: types.Message):
+    """Администратор загружает фото для каталога"""
+    user_id = message.from_user.id
+    logger.info(f"📸 Получено фото от пользователя {user_id}")
+    
+    # Проверяем права
+    if user_id not in ADMIN_IDS:
+        logger.warning(f"⛔️ Пользователь {user_id} не админ")
+        await message.answer("❌ У вас нет прав администратора")
+        return
+    
+    try:
+        photo = message.photo[-1]
+        file_id = photo.file_id
+        logger.info(f"🆔 File_id: {file_id}")
+        
+        # Сохраняем фото локально
+        file_info = await bot.get_file(file_id)
+        file_path = f"data/bouquets/{file_id}.jpg"
+        await bot.download_file(file_info.file_path, file_path)
+        logger.info(f"💾 Фото сохранено: {file_path}")
+        
+        # Добавляем в базу
+        success = db.add_bouquet(file_id, file_path)
+        
+        if success:
+            count = db.get_bouquets_count()
+            await message.answer(
+                f"✅ Фото добавлено в каталог!\n"
+                f"📊 Всего букетов: {count}"
+            )
+        else:
+            await message.answer("❌ Ошибка при сохранении в базу данных")
+            
+    except Exception as e:
+        logger.error(f"❌ Ошибка при обработке фото: {e}")
+        await message.answer(f"❌ Произошла ошибка: {e}")
+
+# ============================================
 # ВЫБОР БУКЕТА ИЗ КАТАЛОГА
 # ============================================
 @dp.message(F.text == "🌸 Выбрать букет из каталога")
@@ -398,34 +440,7 @@ async def handle_text(message: types.Message):
     
     state = user_states.get(user_id)
     
-    # Обработка дня рождения
-    if state == STATE_BIRTHDAY_WAITING:
-        try:
-            parts = text.split(' ', 1)
-            if len(parts) != 2:
-                raise ValueError("Неверный формат")
-            
-            date_str = parts[0]
-            name = parts[1]
-            date_obj = datetime.strptime(date_str, '%d.%m')
-            month_day = date_obj.strftime('%m-%d')
-            db.add_birthday(user_id, name, month_day)
-            
-            await message.answer(
-                f"✅ Готово! Я запомнил день рождения {name} — {date_str}.\n\n"
-                f"За 3 дня до даты я напомню вам и предложу персональную скидку 10%!",
-                reply_markup=main_keyboard
-            )
-            user_states[user_id] = STATE_IDLE
-        except Exception as e:
-            await message.answer(
-                "❌ Неправильный формат. Попробуйте ещё раз, например:\n"
-                "`15.05 мама`",
-                parse_mode='Markdown'
-            )
-        return
-    
-    # Шаги подписки
+    # Шаги подписки (проверяем ПЕРВЫМИ)
     if state == STATE_SUB_RECIPIENT:
         user_data[user_id]['sub_recipient'] = text
         user_states[user_id] = STATE_SUB_PHONE
@@ -483,6 +498,33 @@ async def handle_text(message: types.Message):
             user_states[user_id] = STATE_IDLE
         except Exception as e:
             await message.answer("❌ Введите число (например: 3000)")
+        return
+    
+    # Обработка дня рождения
+    if state == STATE_BIRTHDAY_WAITING:
+        try:
+            parts = text.split(' ', 1)
+            if len(parts) != 2:
+                raise ValueError("Неверный формат")
+            
+            date_str = parts[0]
+            name = parts[1]
+            date_obj = datetime.strptime(date_str, '%d.%m')
+            month_day = date_obj.strftime('%m-%d')
+            db.add_birthday(user_id, name, month_day)
+            
+            await message.answer(
+                f"✅ Готово! Я запомнил день рождения {name} — {date_str}.\n\n"
+                f"За 3 дня до даты я напомню вам и предложу персональную скидку 10%!",
+                reply_markup=main_keyboard
+            )
+            user_states[user_id] = STATE_IDLE
+        except Exception as e:
+            await message.answer(
+                "❌ Неправильный формат. Попробуйте ещё раз, например:\n"
+                "`15.05 мама`",
+                parse_mode='Markdown'
+            )
         return
     
     # Шаги заказа (остальные)
