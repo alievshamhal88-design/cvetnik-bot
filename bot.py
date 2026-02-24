@@ -14,9 +14,15 @@ from aiogram.types import (
 from aiogram.filters import Command
 from aiohttp import web
 
-from config import ADMIN_IDS, YANDEX_FOLDER_ID, YANDEX_API_KEY, YANDEX_MODELS
+from config import ADMIN_IDS
 from database import Database
 from yandex_client import YandexGPTClient
+
+# ============================================
+# ЛОГИРОВАНИЕ (ПЕРВЫМ!)
+# ============================================
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # ============================================
 # НАСТРОЙКИ БОТА
@@ -24,10 +30,12 @@ from yandex_client import YandexGPTClient
 API_TOKEN = "8462470094:AAHSlSA20IvbGG2AMOBDL9qk3eqXakzuwWg"
 
 # Инициализация YandexGPT
-yandex_gpt = YandexGPTClient(
-    folder_id=YANDEX_FOLDER_ID,
-    api_key=YANDEX_API_KEY
-)
+try:
+    yandex_gpt = YandexGPTClient()
+    logger.info("✅ YandexGPT клиент создан")
+except ValueError as e:
+    logger.error(f"❌ Ошибка создания YandexGPT клиента: {e}")
+    yandex_gpt = None
 
 BRANCHES = {
     '2-я Марата, 22': {'id': 7364255009, 'username': '@cvetnik_sib', 'is_admin': False},
@@ -36,13 +44,7 @@ BRANCHES = {
 }
 
 # ============================================
-# ЛОГИРОВАНИЕ
-# ============================================
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# ============================================
-# ИНИЦИАЛИЗАЦИЯ
+# ИНИЦИАЛИЗАЦИЯ БОТА
 # ============================================
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
@@ -73,7 +75,7 @@ user_data = {}
 user_states = {}
 
 # ============================================
-# КЛАВИАТУРЫ (без изменений)
+# КЛАВИАТУРЫ
 # ============================================
 client_phone_keyboard = ReplyKeyboardMarkup(
     keyboard=[[KeyboardButton(text="📱 Отправить мой номер", request_contact=True)]],
@@ -147,29 +149,41 @@ async def generate_bouquet_info(photo_file_id):
     YandexGPT смотрит на фото и генерирует название и описание
     """
     try:
+        logger.info(f"🖼️ Начинаю обработку фото: {photo_file_id}")
+        
         # Скачиваем фото
         file_info = await bot.get_file(photo_file_id)
         file_bytes = await bot.download_file(file_info.file_path)
         image_bytes = file_bytes.read()
+        logger.info(f"✅ Фото скачано, размер: {len(image_bytes)} байт")
+        
+        # Проверяем, что клиент существует
+        if yandex_gpt is None:
+            logger.error("❌ YandexGPT клиент не инициализирован")
+            raise Exception("YandexGPT клиент не доступен")
         
         # Генерируем через YandexGPT
+        logger.info("🔄 Отправляю запрос к YandexGPT...")
         result = yandex_gpt.generate_bouquet_info(image_bytes)
         
         if result:
             name, description = result
-            logger.info(f"✅ YandexGPT: {name}")
+            logger.info(f"✅ YandexGPT успешно сгенерировал: {name}")
             return name, description
-        
+        else:
+            logger.warning("⚠️ YandexGPT вернул пустой результат")
+            
     except Exception as e:
-        logger.error(f"❌ Ошибка YandexGPT: {e}")
+        logger.error(f"❌ Ошибка YandexGPT: {e}", exc_info=True)
     
     # Запасные варианты
+    logger.info("🔄 Использую запасные варианты названий")
     fallback_names = ["Нежность утра", "Цветочная симфония", "Весеннее настроение"]
     fallback_desc = ["Нежный букет из свежих цветов, собранный с любовью."]
     return random.choice(fallback_names), random.choice(fallback_desc)
 
 # ============================================
-# ОБРАБОТЧИКИ
+# ОБРАБОТЧИКИ КОМАНД
 # ============================================
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
@@ -189,13 +203,28 @@ async def test_handler(message: types.Message):
 
 @dp.message(Command("test_yandex"))
 async def test_yandex(message: types.Message):
-    """Тест YandexGPT без фото"""
+    """Тест YandexGPT"""
     try:
+        folder_id = os.getenv("YANDEX_FOLDER_ID")
+        api_key = os.getenv("YANDEX_API_KEY")
+        
+        if not folder_id or not api_key:
+            await message.answer("❌ Отсутствуют переменные окружения")
+            return
+            
+        await message.answer(f"🔄 Использую Folder ID: {folder_id[:5]}...")
+        
+        if yandex_gpt is None:
+            await message.answer("❌ YandexGPT клиент не инициализирован")
+            return
+        
         result = yandex_gpt.generate_test()
+        
         if result:
-            await message.answer(f"✅ YandexGPT ответил:\n{result}")
+            await message.answer(f"✅ Успех! Ответ: {result}")
         else:
-            await message.answer("❌ YandexGPT не ответил")
+            await message.answer("❌ Не удалось получить ответ от API")
+            
     except Exception as e:
         await message.answer(f"❌ Ошибка: {e}")
 
