@@ -14,33 +14,21 @@ from aiogram.types import (
 from aiogram.filters import Command
 from aiohttp import web
 
-from config import ADMIN_IDS
+from config import ADMIN_IDS, YANDEX_FOLDER_ID, YANDEX_API_KEY, YANDEX_MODELS
 from database import Database
-from gigachat_client import GigaChatClient
+from yandex_client import YandexGPTClient
 
 # ============================================
 # НАСТРОЙКИ БОТА
 # ============================================
 API_TOKEN = "8462470094:AAHSlSA20IvbGG2AMOBDL9qk3eqXakzuwWg"
 
-# GigaChat авторизация
-GIGACHAT_AUTH_KEY = os.getenv("GIGACHAT_AUTH_KEY")
-GIGACHAT_CLIENT_ID = os.getenv("GIGACHAT_CLIENT_ID")
-GIGACHAT_CLIENT_SECRET = os.getenv("GIGACHAT_CLIENT_SECRET")
+# Инициализация YandexGPT
+yandex_gpt = YandexGPTClient(
+    folder_id=YANDEX_FOLDER_ID,
+    api_key=YANDEX_API_KEY
+)
 
-# Уровень доступа. Если не задан, используется для физических лиц
-GIGACHAT_SCOPE = os.getenv("GIGACHAT_SCOPE", "GIGACHAT_API_PERS")
-
-if GIGACHAT_AUTH_KEY:
-    gigachat = GigaChatClient(auth_key=GIGACHAT_AUTH_KEY, scope=GIGACHAT_SCOPE)
-elif GIGACHAT_CLIENT_ID and GIGACHAT_CLIENT_SECRET:
-    gigachat = GigaChatClient(
-        client_id=GIGACHAT_CLIENT_ID,
-        client_secret=GIGACHAT_CLIENT_SECRET,
-        scope=GIGACHAT_SCOPE
-    )
-else:
-    raise ValueError("❌ Не найдены авторизационные данные для GigaChat!")
 BRANCHES = {
     '2-я Марата, 22': {'id': 7364255009, 'username': '@cvetnik_sib', 'is_admin': False},
     'Некрасова, 41': {'id': 7651760894, 'username': '@cvetnik1_sib', 'is_admin': True},
@@ -152,11 +140,11 @@ async def run_web_server():
     logger.info(f"✅ Пинг-сервер запущен на порту {port}")
 
 # ============================================
-# ФУНКЦИИ ДЛЯ GIGACHAT
+# ФУНКЦИИ ДЛЯ YANDEXGPT
 # ============================================
 async def generate_bouquet_info(photo_file_id):
     """
-    GigaChat смотрит на фото и генерирует название и описание
+    YandexGPT смотрит на фото и генерирует название и описание
     """
     try:
         # Скачиваем фото
@@ -164,20 +152,16 @@ async def generate_bouquet_info(photo_file_id):
         file_bytes = await bot.download_file(file_info.file_path)
         image_bytes = file_bytes.read()
         
-        # Генерируем через GigaChat
-        result = gigachat.generate_with_image(
-            prompt="",
-            image_bytes=image_bytes,
-            model='GigaChat-2-Max'
-        )
+        # Генерируем через YandexGPT
+        result = yandex_gpt.generate_bouquet_info(image_bytes)
         
         if result:
             name, description = result
-            logger.info(f"✅ GigaChat: {name}")
+            logger.info(f"✅ YandexGPT: {name}")
             return name, description
         
     except Exception as e:
-        logger.error(f"❌ Ошибка GigaChat: {e}")
+        logger.error(f"❌ Ошибка YandexGPT: {e}")
     
     # Запасные варианты
     fallback_names = ["Нежность утра", "Цветочная симфония", "Весеннее настроение"]
@@ -203,106 +187,18 @@ async def cmd_start(message: types.Message):
 async def test_handler(message: types.Message):
     await message.answer(f"✅ Тест работает! Ваш ID: {message.from_user.id}")
 
-@dp.message(Command("test_gigachat"))
-async def test_gigachat(message: types.Message):
-    """Тест GigaChat без фото"""
+@dp.message(Command("test_yandex"))
+async def test_yandex(message: types.Message):
+    """Тест YandexGPT без фото"""
     try:
-        result = gigachat.generate_with_image(
-            prompt="Придумай красивое название для букета цветов",
-            image_bytes=None,
-            model='GigaChat-2-Lite'
-        )
+        result = yandex_gpt.generate_test()
         if result:
-            name, desc = result
-            await message.answer(f"✅ GigaChat ответил:\nНазвание: {name}\nОписание: {desc}")
+            await message.answer(f"✅ YandexGPT ответил:\n{result}")
         else:
-            await message.answer("❌ GigaChat не ответил")
+            await message.answer("❌ YandexGPT не ответил")
     except Exception as e:
         await message.answer(f"❌ Ошибка: {e}")
-@dp.message(Command("test_gigachat_detailed"))
-async def test_gigachat_detailed(message: types.Message):
-    """Детальный тест GigaChat с выводом всех шагов"""
-    try:
-        # Проверяем наличие ключа
-        auth_key = os.getenv("GIGACHAT_AUTH_KEY")
-        if not auth_key:
-            await message.answer("❌ GIGACHAT_AUTH_KEY не найден в переменных окружения")
-            return
-        
-        await message.answer(f"🔑 Ключ найден (первые 10 символов): {auth_key[:10]}...")
-        
-        # Шаг 1: Получение токена
-        await message.answer("🔄 Шаг 1: Получаю токен...")
-        
-        import requests
-        import base64
-        import json
-        
-        headers = {
-            'Authorization': f'Basic {auth_key}',
-            'RqUID': 'test-bot',
-            'Content-Type': 'application/x-www-form-urlencoded'
-        }
-        
-        response = requests.post(
-            'https://ngw.devices.sberbank.ru:9443/api/v2/oauth',
-            headers=headers,
-            data={'scope': 'GIGACHAT_API_PERS'},
-            verify=False,
-            timeout=30
-        )
-        
-        await message.answer(f"📊 Статус получения токена: {response.status_code}")
-        
-        if response.status_code != 200:
-            await message.answer(f"❌ Ошибка: {response.text[:200]}")
-            return
-        
-        token_data = response.json()
-        token = token_data.get('access_token')
-        expires = token_data.get('expires_in')
-        
-        await message.answer(f"✅ Токен получен! Истекает через {expires} сек")
-        
-        # Шаг 2: Отправка запроса к GigaChat
-        await message.answer("🔄 Шаг 2: Отправляю запрос к GigaChat...")
-        
-        headers = {
-            'Authorization': f'Bearer {token}',
-            'Content-Type': 'application/json'
-        }
-        
-        payload = {
-            "model": "GigaChat-2-Lite",
-            "messages": [
-                {
-                    "role": "user",
-                    "content": "Придумай красивое название для букета цветов (только название, без описания)"
-                }
-            ],
-            "temperature": 0.7,
-            "max_tokens": 100
-        }
-        
-        response = requests.post(
-            'https://gigachat.devices.sberbank.ru/api/v1/chat/completions',
-            headers=headers,
-            json=payload,
-            verify=False,
-            timeout=30
-        )
-        
-        await message.answer(f"📊 Статус запроса: {response.status_code}")
-        
-        if response.status_code == 200:
-            result = response.json()
-            answer = result['choices'][0]['message']['content']
-            await message.answer(f"✅ Ответ GigaChat:\n{answer}")
-        else:
-            await message.answer(f"❌ Ошибка: {response.text[:200]}")
-            
-    except Exception as e:
-        await message.answer(f"❌ Исключение: {type(e).__name__}: {e}")
+
 # ============================================
 # ЗАГРУЗКА ФОТО АДМИНИСТРАТОРОМ
 # ============================================
