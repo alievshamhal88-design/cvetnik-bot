@@ -23,11 +23,15 @@ from yandex_client import YandexGPTClient
 # ============================================
 API_TOKEN = "8462470094:AAHSlSA20IvbGG2AMOBDL9qk3eqXakzuwWg"
 
-# Инициализация YandexGPT
-yandex_gpt = YandexGPTClient(
-    folder_id=YANDEX_FOLDER_ID,
-    api_key=YANDEX_API_KEY
-)
+# ============================================
+# ИНИЦИАЛИЗАЦИЯ YANDEXGPT
+# ============================================
+try:
+    yandex_gpt = YandexGPTClient()  # Без параметров, сам возьмёт из окружения
+    logger.info("✅ YandexGPT клиент создан")
+except ValueError as e:
+    logger.error(f"❌ Ошибка создания YandexGPT клиента: {e}")
+    yandex_gpt = None
 
 BRANCHES = {
     '2-я Марата, 22': {'id': 7364255009, 'username': '@cvetnik_sib', 'is_admin': False},
