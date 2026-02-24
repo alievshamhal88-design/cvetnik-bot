@@ -142,48 +142,81 @@ async def run_web_server():
     logger.info(f"✅ Пинг-сервер запущен на порту {port}")
 
 # ============================================
-# ФУНКЦИИ ДЛЯ YANDEXGPT
+# ВЫБОР БУКЕТА ИЗ КАТАЛОГА
 # ============================================
-async def generate_bouquet_info(photo_file_id):
-    """
-    YandexGPT смотрит на фото и генерирует название и описание
-    """
-    try:
-        logger.info(f"🖼️ Начинаю обработку фото: {photo_file_id}")
-        
-        # Скачиваем фото
-        file_info = await bot.get_file(photo_file_id)
-        file_bytes = await bot.download_file(file_info.file_path)
-        image_bytes = file_bytes.read()
-        logger.info(f"✅ Фото скачано, размер: {len(image_bytes)} байт")
-        
-        # Проверяем, что клиент существует
-        if yandex_gpt is None:
-            logger.error("❌ YandexGPT клиент не инициализирован")
-            raise Exception("YandexGPT клиент не доступен")
-        
-        # Генерируем через YandexGPT
-        logger.info("🔄 Отправляю запрос к YandexGPT...")
-        result = yandex_gpt.generate_bouquet_info(image_bytes)
-        
-        if result:
-            name, description = result
-            logger.info(f"✅ YandexGPT успешно сгенерировал: {name}")
-            return name, description
-        else:
-            logger.warning("⚠️ YandexGPT вернул пустой результат")
-            
-    except Exception as e:
-        logger.error(f"❌ Ошибка YandexGPT: {e}", exc_info=True)
+@dp.message(F.text == "🌸 Выбрать букет из каталога")
+async def catalog_start(message: types.Message):
+    user_id = message.from_user.id
     
-    # Запасные варианты
-    logger.info("🔄 Использую запасные варианты названий")
-    fallback_names = ["Нежность утра", "Цветочная симфония", "Весеннее настроение"]
-    fallback_desc = ["Нежный букет из свежих цветов, собранный с любовью."]
-    return random.choice(fallback_names), random.choice(fallback_desc)
+    if db.get_bouquets_count() == 0:
+        await message.answer("😢 В каталоге пока нет букетов. Скоро добавим!")
+        return
+    
+    for i in range(3):
+        bouquet = db.get_random_bouquet()
+        if not bouquet:
+            continue
+        
+        status_msg = await message.answer(f"🌸 Придумываю красивое название... ✨")
+        
+        # Генерируем название
+        name = None
+        if yandex_gpt:
+            name = yandex_gpt.generate_bouquet_name()
+        
+        # Если не получилось — запасной вариант
+        if not name:
+            fallback_names = ["Нежность утра", "Цветочная симфония", "Весеннее настроение", 
+                            "Аромат любви", "Солнечный день", "Летний сад"]
+            name = random.choice(fallback_names)
+        
+        await status_msg.delete()
+        
+        # Описание с информацией о цене
+        description = (
+            "✨ Конечную стоимость букета с вашей скидкой сформируем\n"
+            "после оформления заказа при уточнении деталей."
+        )
+        
+        user_data[user_id] = user_data.get(user_id, {})
+        user_data[user_id][f'b_name_{i}'] = name
+        user_data[user_id][f'b_desc_{i}'] = description
+        user_data[user_id][f'b_id_{i}'] = bouquet['id']
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Выбрать этот букет", callback_data=f"select_{i}")]
+        ])
+        
+        caption = f"🌸 **{name}**\n\n{description}"
+        await message.answer_photo(
+            photo=bouquet['photo_file_id'],
+            caption=caption,
+            reply_markup=keyboard,
+            parse_mode='Markdown'
+        )
+
+@dp.callback_query(F.data.startswith('select_'))
+async def select_bouquet(callback: types.CallbackQuery):
+    index = int(callback.data.split('_')[1])
+    user_id = callback.from_user.id
+    
+    name = user_data.get(user_id, {}).get(f'b_name_{index}', "Выбранный букет")
+    desc = user_data.get(user_id, {}).get(f'b_desc_{index}', "")
+    
+    user_data[user_id] = user_data.get(user_id, {})
+    user_data[user_id]['product'] = name
+    user_data[user_id]['product_description'] = desc
+    user_data[user_id]['product_source'] = 'catalog_ai'
+    
+    await callback.message.answer(
+        f"✅ Вы выбрали: **{name}**\n\n📝 Теперь напишите ваше имя:",
+        parse_mode='Markdown'
+    )
+    user_states[user_id] = STATE_WAITING_CLIENT_NAME
+    await callback.answer()
 
 # ============================================
-# ОБРАБОТЧИКИ КОМАНД
+# КОМАНДА START
 # ============================================
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
@@ -261,63 +294,6 @@ async def handle_admin_photo(message: types.Message):
         await message.answer(f"❌ Ошибка: {e}")
 
 # ============================================
-# ВЫБОР БУКЕТА ИЗ КАТАЛОГА
-# ============================================
-@dp.message(F.text == "🌸 Выбрать букет из каталога")
-async def catalog_start(message: types.Message):
-    user_id = message.from_user.id
-    
-    if db.get_bouquets_count() == 0:
-        await message.answer("😢 В каталоге пока нет букетов. Скоро добавим!")
-        return
-    
-    for i in range(3):
-        bouquet = db.get_random_bouquet()
-        if not bouquet:
-            continue
-        
-        status_msg = await message.answer(f"🌸 Подбираем для вас лучший букет... ✨")
-        name, description = await generate_bouquet_info(bouquet['photo_file_id'])
-        await status_msg.delete()
-        
-        user_data[user_id] = user_data.get(user_id, {})
-        user_data[user_id][f'b_name_{i}'] = name
-        user_data[user_id][f'b_desc_{i}'] = description
-        user_data[user_id][f'b_id_{i}'] = bouquet['id']
-        
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="✅ Выбрать этот букет", callback_data=f"select_{i}")]
-        ])
-        
-        caption = f"🌸 **{name}**\n\n{description}"
-        await message.answer_photo(
-            photo=bouquet['photo_file_id'],
-            caption=caption,
-            reply_markup=keyboard,
-            parse_mode='Markdown'
-        )
-
-@dp.callback_query(F.data.startswith('select_'))
-async def select_bouquet(callback: types.CallbackQuery):
-    index = int(callback.data.split('_')[1])
-    user_id = callback.from_user.id
-    
-    name = user_data.get(user_id, {}).get(f'b_name_{index}', "Выбранный букет")
-    desc = user_data.get(user_id, {}).get(f'b_desc_{index}', "")
-    
-    user_data[user_id] = user_data.get(user_id, {})
-    user_data[user_id]['product'] = name
-    user_data[user_id]['product_description'] = desc
-    user_data[user_id]['product_source'] = 'catalog_ai'
-    
-    await callback.message.answer(
-        f"✅ Вы выбрали: **{name}**\n\n📝 Теперь напишите ваше имя:",
-        parse_mode='Markdown'
-    )
-    user_states[user_id] = STATE_WAITING_CLIENT_NAME
-    await callback.answer()
-
-# ============================================
 # ДНИ РОЖДЕНИЯ
 # ============================================
 @dp.message(F.text == "🎂 Сохранить день рождения")
@@ -331,6 +307,37 @@ async def birthday_start(message: types.Message):
         parse_mode='Markdown'
     )
     user_states[message.from_user.id] = STATE_BIRTHDAY_WAITING
+
+@dp.message(F.text)
+async def handle_birthday_input(message: types.Message):
+    user_id = message.from_user.id
+    if user_states.get(user_id) != STATE_BIRTHDAY_WAITING:
+        return
+    
+    text = message.text.strip()
+    try:
+        parts = text.split(' ', 1)
+        if len(parts) != 2:
+            raise ValueError("Неверный формат")
+        
+        date_str = parts[0]
+        name = parts[1]
+        date_obj = datetime.strptime(date_str, '%d.%m')
+        month_day = date_obj.strftime('%m-%d')
+        db.add_birthday(user_id, name, month_day)
+        
+        await message.answer(
+            f"✅ Готово! Я запомнил день рождения {name} — {date_str}.\n\n"
+            f"За 3 дня до даты я напомню вам и предложу персональную скидку 10%!",
+            reply_markup=main_keyboard
+        )
+        user_states[user_id] = STATE_IDLE
+    except Exception as e:
+        await message.answer(
+            "❌ Неправильный формат. Попробуйте ещё раз, например:\n"
+            "`15.05 мама`",
+            parse_mode='Markdown'
+        )
 
 # ============================================
 # ЦВЕТОЧНАЯ ПОДПИСКА
@@ -427,7 +434,7 @@ async def order_start(message: types.Message):
     )
 
 # ============================================
-# ОБРАБОТКА ТЕКСТА
+# ОБРАБОТКА ТЕКСТА (ОСНОВНАЯ)
 # ============================================
 @dp.message(F.text)
 async def handle_text(message: types.Message):
@@ -499,33 +506,6 @@ async def handle_text(message: types.Message):
             user_states[user_id] = STATE_IDLE
         except Exception as e:
             await message.answer("❌ Введите число (например: 3000)")
-        return
-    
-    # Обработка дня рождения
-    if state == STATE_BIRTHDAY_WAITING:
-        try:
-            parts = text.split(' ', 1)
-            if len(parts) != 2:
-                raise ValueError("Неверный формат")
-            
-            date_str = parts[0]
-            name = parts[1]
-            date_obj = datetime.strptime(date_str, '%d.%m')
-            month_day = date_obj.strftime('%m-%d')
-            db.add_birthday(user_id, name, month_day)
-            
-            await message.answer(
-                f"✅ Готово! Я запомнил день рождения {name} — {date_str}.\n\n"
-                f"За 3 дня до даты я напомню вам и предложу персональную скидку 10%!",
-                reply_markup=main_keyboard
-            )
-            user_states[user_id] = STATE_IDLE
-        except Exception as e:
-            await message.answer(
-                "❌ Неправильный формат. Попробуйте ещё раз, например:\n"
-                "`15.05 мама`",
-                parse_mode='Markdown'
-            )
         return
     
     # Шаги заказа
