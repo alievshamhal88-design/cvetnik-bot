@@ -3,18 +3,20 @@ import base64
 import json
 import time
 import logging
+import uuid
 from typing import Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
 class GigaChatClient:
-    def __init__(self, client_id=None, client_secret=None, auth_key=None):
+    def __init__(self, client_id=None, client_secret=None, auth_key=None, scope='GIGACHAT_API_PERS'):
         """
         Инициализация клиента GigaChat
-        Можно использовать либо пару (client_id, client_secret), либо готовый auth_key
+        :param scope: уровень доступа (GIGACHAT_API_PERS, GIGACHAT_API_B2B, GIGACHAT_API_CORP) [citation:2]
         """
         self.auth_token = None
         self.token_expires = 0
+        self.scope = scope
         
         if auth_key:
             self.auth_key = auth_key
@@ -25,26 +27,31 @@ class GigaChatClient:
         else:
             raise ValueError("❌ Необходимо указать либо auth_key, либо пару client_id:client_secret")
         
-        logger.info("✅ GigaChat клиент инициализирован")
+        logger.info(f"✅ GigaChat клиент инициализирован (scope: {scope})")
     
     def _get_auth_token(self):
-        """Получение токена доступа"""
+        """Получение токена доступа с правильным RqUID и scope [citation:1][citation:2]"""
         if self.auth_token and time.time() < self.token_expires:
             return self.auth_token
         
         try:
+            # Генерируем уникальный RqUID в формате uuid4
+            rquid = str(uuid.uuid4())
+            
             headers = {
                 'Authorization': f'Basic {self.auth_key}',
-                'RqUID': 'cvetnik-bot',  # Уникальный ID запроса
+                'RqUID': rquid,
                 'Content-Type': 'application/x-www-form-urlencoded'
             }
-            data = {'scope': 'GIGACHAT_API_PERS'}
+            data = {'scope': self.scope}
+            
+            logger.info(f"🔄 Запрос токена с RqUID: {rquid} и scope: {self.scope}")
             
             response = requests.post(
                 'https://ngw.devices.sberbank.ru:9443/api/v2/oauth',
                 headers=headers,
                 data=data,
-                verify=False,  # Для самоподписанного сертификата
+                verify=False,  # Для самоподписанного сертификата (можно настроить позже)
                 timeout=30
             )
             
@@ -77,18 +84,26 @@ class GigaChatClient:
                 'Content-Type': 'application/json'
             }
             
-            # Если есть изображение, кодируем его в base64
-            content = prompt
-            if image_bytes:
-                image_base64 = base64.b64encode(image_bytes).decode()
-                content = f"{prompt}\n\n[IMG]{image_base64}[/IMG]"
+            # Кодируем изображение в base64
+            image_base64 = base64.b64encode(image_bytes).decode()
+            
+            full_prompt = (
+                "Посмотри на это фото букета цветов. Напиши для него:\n\n"
+                "1. КРАСИВОЕ НАЗВАНИЕ (2-4 слова, поэтичное, на русском)\n"
+                "2. КОРОТКОЕ ОПИСАНИЕ (2-3 предложения о букете: какие цветы, "
+                "какое настроение, для какого повода подойдёт)\n\n"
+                "Формат ответа (строго соблюдай):\n"
+                "Название: ...\n"
+                "Описание: ...\n\n"
+                f"{prompt}\n\n[IMG]{image_base64}[/IMG]"
+            )
             
             payload = {
                 "model": model,
                 "messages": [
                     {
                         "role": "user",
-                        "content": content
+                        "content": full_prompt
                     }
                 ],
                 "temperature": 0.7,
