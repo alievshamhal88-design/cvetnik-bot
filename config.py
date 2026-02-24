@@ -4,17 +4,10 @@ ADMIN_IDS = [
     7750251679,  # @Alan_Aliev
 ]
 
-# Время публикации (если нужно для постера)
-POST_TIMES = [
-    "09:00",
-    "18:00"
+# Настройки Gemini
+GEMINI_MODELS = [
+    'gemini-2.5-flash',
+    'gemini-2.5-pro',
+    'gemini-3.0-flash-preview',
+    'gemini-3.1-pro-preview'
 ]
-
-# Состояния для новых модулей
-STATE_BIRTHDAY_WAITING = 100
-STATE_SUB_RECIPIENT = 101
-STATE_SUB_PHONE = 102
-STATE_SUB_ADDRESS = 103
-STATE_SUB_FREQUENCY = 104
-STATE_SUB_BUDGET = 105
-STATE_SUB_CONFIRM = 106
