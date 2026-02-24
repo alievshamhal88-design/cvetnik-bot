@@ -296,8 +296,8 @@ async def catalog_start(message: types.Message):
         if not bouquet:
             continue
         
-        # Генерируем название и описание через Gemini
-        status_msg = await message.answer(f"✨ Генерирую описание для букета {i+1}...")
+# Генерируем название и описание через Gemini
+status_msg = await message.answer(f"🌸 Подбираем для вас лучший букет... ✨")
         
         name, description = await generate_bouquet_info(bouquet['photo_file_id'])
         
