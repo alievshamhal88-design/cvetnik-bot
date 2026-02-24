@@ -216,7 +216,90 @@ async def test_gigachat(message: types.Message):
             await message.answer("❌ GigaChat не ответил")
     except Exception as e:
         await message.answer(f"❌ Ошибка: {e}")
-
+@dp.message(Command("test_gigachat_detailed"))
+async def test_gigachat_detailed(message: types.Message):
+    """Детальный тест GigaChat с выводом всех шагов"""
+    try:
+        # Проверяем наличие ключа
+        auth_key = os.getenv("GIGACHAT_AUTH_KEY")
+        if not auth_key:
+            await message.answer("❌ GIGACHAT_AUTH_KEY не найден в переменных окружения")
+            return
+        
+        await message.answer(f"🔑 Ключ найден (первые 10 символов): {auth_key[:10]}...")
+        
+        # Шаг 1: Получение токена
+        await message.answer("🔄 Шаг 1: Получаю токен...")
+        
+        import requests
+        import base64
+        import json
+        
+        headers = {
+            'Authorization': f'Basic {auth_key}',
+            'RqUID': 'test-bot',
+            'Content-Type': 'application/x-www-form-urlencoded'
+        }
+        
+        response = requests.post(
+            'https://ngw.devices.sberbank.ru:9443/api/v2/oauth',
+            headers=headers,
+            data={'scope': 'GIGACHAT_API_PERS'},
+            verify=False,
+            timeout=30
+        )
+        
+        await message.answer(f"📊 Статус получения токена: {response.status_code}")
+        
+        if response.status_code != 200:
+            await message.answer(f"❌ Ошибка: {response.text[:200]}")
+            return
+        
+        token_data = response.json()
+        token = token_data.get('access_token')
+        expires = token_data.get('expires_in')
+        
+        await message.answer(f"✅ Токен получен! Истекает через {expires} сек")
+        
+        # Шаг 2: Отправка запроса к GigaChat
+        await message.answer("🔄 Шаг 2: Отправляю запрос к GigaChat...")
+        
+        headers = {
+            'Authorization': f'Bearer {token}',
+            'Content-Type': 'application/json'
+        }
+        
+        payload = {
+            "model": "GigaChat-2-Lite",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "Придумай красивое название для букета цветов (только название, без описания)"
+                }
+            ],
+            "temperature": 0.7,
+            "max_tokens": 100
+        }
+        
+        response = requests.post(
+            'https://gigachat.devices.sberbank.ru/api/v1/chat/completions',
+            headers=headers,
+            json=payload,
+            verify=False,
+            timeout=30
+        )
+        
+        await message.answer(f"📊 Статус запроса: {response.status_code}")
+        
+        if response.status_code == 200:
+            result = response.json()
+            answer = result['choices'][0]['message']['content']
+            await message.answer(f"✅ Ответ GigaChat:\n{answer}")
+        else:
+            await message.answer(f"❌ Ошибка: {response.text[:200]}")
+            
+    except Exception as e:
+        await message.answer(f"❌ Исключение: {type(e).__name__}: {e}")
 # ============================================
 # ЗАГРУЗКА ФОТО АДМИНИСТРАТОРОМ
 # ============================================
