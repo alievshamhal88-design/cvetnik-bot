@@ -21,32 +21,20 @@ class YandexGPTClient:
         logger.info(f"✅ YandexGPT клиент инициализирован (folder_id: {folder_id})")
 
     def _prepare_image(self, image_bytes: bytes) -> str:
-        """
-        Подготавливает изображение для отправки в YandexGPT
-        """
-        # Открываем изображение и конвертируем в JPEG
+        """Подготавливает изображение для отправки"""
         image = Image.open(BytesIO(image_bytes))
         if image.mode != 'RGB':
             image = image.convert('RGB')
-
-        # Сохраняем в буфер
         buffer = BytesIO()
         image.save(buffer, format='JPEG', quality=85)
         buffer.seek(0)
-
-        # Кодируем в base64
         return base64.b64encode(buffer.read()).decode()
 
     def generate_bouquet_info(self, image_bytes: bytes) -> Optional[Tuple[str, str]]:
-        """
-        Генерирует название и описание букета по фото
-        Возвращает кортеж (название, описание)
-        """
+        """Генерирует название и описание букета по фото"""
         try:
-            # Подготавливаем изображение
             image_base64 = self._prepare_image(image_bytes)
 
-            # Формируем промпт для YandexGPT
             prompt = (
                 "Посмотри на это фото букета цветов. Напиши для него:\n\n"
                 "1. КРАСИВОЕ НАЗВАНИЕ (2-4 слова, поэтичное, на русском)\n"
@@ -57,9 +45,8 @@ class YandexGPTClient:
                 "Описание: ..."
             )
 
-            # Формируем запрос к YandexGPT с правильным форматом для изображений
             payload = {
-                "modelUri": f"gpt://{self.folder_id}/yandexgpt/latest",
+                "modelUri": f"gpt://{self.folder_id}/yandexgpt-lite",
                 "completionOptions": {
                     "stream": False,
                     "temperature": 0.7,
@@ -69,7 +56,7 @@ class YandexGPTClient:
                     {
                         "role": "user",
                         "text": prompt,
-                        "images": [image_base64]  # Изображение передаётся отдельным полем
+                        "image": image_base64  # Изменено с "images" на "image"
                     }
                 ]
             }
@@ -90,7 +77,7 @@ class YandexGPTClient:
             if response.status_code == 200:
                 result = response.json()
                 text = result['result']['alternatives'][0]['message']['text']
-
+                
                 # Парсим ответ
                 lines = text.split('\n')
                 name = "Волшебный букет"
@@ -109,16 +96,14 @@ class YandexGPTClient:
                 return None
 
         except Exception as e:
-            logger.error(f"❌ Исключение при работе с YandexGPT: {e}")
+            logger.error(f"❌ Исключение: {e}")
             return None
 
     def generate_test(self) -> Optional[str]:
-        """
-        Тестовый запрос без изображения
-        """
+        """Тестовый запрос без изображения"""
         try:
             payload = {
-                "modelUri": f"gpt://{self.folder_id}/yandexgpt/latest",
+                "modelUri": f"gpt://{self.folder_id}/yandexgpt-lite",
                 "completionOptions": {
                     "stream": False,
                     "temperature": 0.7,
@@ -127,7 +112,7 @@ class YandexGPTClient:
                 "messages": [
                     {
                         "role": "user",
-                        "text": "Придумай красивое название для букета цветов (только название, без описания)"
+                        "text": "Придумай красивое название для букета цветов (только название)"
                     }
                 ]
             }
