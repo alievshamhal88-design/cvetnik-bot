@@ -288,20 +288,9 @@ async def subscription_info(callback: types.CallbackQuery):
     await callback.answer()
 
 # ============================================
-# ОСТАЛЬНЫЕ ОБРАБОТЧИКИ (КОМАНДЫ)
+# КОМАНДА START (ЕДИНСТВЕННАЯ, ИСПРАВЛЕННАЯ)
 # ============================================
 @dp.message(Command("start"))
-async def cmd_start(message: types.Message):
-    user_id = message.from_user.id
-    logger.info(f"🖥️ Команда /start от пользователя {user_id}")
-    
-    # Просто отвечаем приветствием
-    await message.answer(
-        "🌸 Добро пожаловать в «Цветник»!\n\n"
-        "Я помогу быстро заказать букет с доставкой по Новосибирску.\n\n"
-        "👇 Выберите действие в меню ниже",
-        reply_markup=main_keyboard
-    )
 async def cmd_start(message: types.Message):
     user_id = message.from_user.id
     user_states[user_id] = STATE_IDLE
@@ -721,8 +710,6 @@ async def check_birthdays():
 # ============================================
 async def scheduler():
     while True:
-        now = datetime.now()
-        # Проверяем каждый час
         await asyncio.sleep(3600)
         await check_birthdays()
 
