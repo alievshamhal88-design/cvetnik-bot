@@ -24,12 +24,10 @@ from yandex_client import YandexGPTClient
 API_TOKEN = "8462470094:AAHSlSA20IvbGG2AMOBDL9qk3eqXakzuwWg"
 
 # Инициализация YandexGPT
-try:
-    yandex_gpt = YandexGPTClient()
-    logger.info("✅ YandexGPT клиент создан")
-except ValueError as e:
-    logger.error(f"❌ Ошибка создания YandexGPT клиента: {e}")
-    yandex_gpt = None
+yandex_gpt = YandexGPTClient(
+    folder_id=YANDEX_FOLDER_ID,
+    api_key=YANDEX_API_KEY
+)
 
 BRANCHES = {
     '2-я Марата, 22': {'id': 7364255009, 'username': '@cvetnik_sib', 'is_admin': False},
@@ -185,28 +183,19 @@ async def cmd_start(message: types.Message):
         reply_markup=main_keyboard
     )
 
+@dp.message(Command("test"))
+async def test_handler(message: types.Message):
+    await message.answer(f"✅ Тест работает! Ваш ID: {message.from_user.id}")
+
 @dp.message(Command("test_yandex"))
 async def test_yandex(message: types.Message):
-    """Максимально простой тест"""
+    """Тест YandexGPT без фото"""
     try:
-        # Проверяем, что ключи вообще существуют
-        folder_id = os.getenv("YANDEX_FOLDER_ID")
-        api_key = os.getenv("YANDEX_API_KEY")
-        
-        if not folder_id or not api_key:
-            await message.answer("❌ Отсутствуют переменные окружения")
-            return
-            
-        await message.answer(f"🔄 Использую Folder ID: {folder_id[:5]}...")
-        
-        # Выполняем тест
         result = yandex_gpt.generate_test()
-        
         if result:
-            await message.answer(f"✅ Успех! Ответ: {result}")
+            await message.answer(f"✅ YandexGPT ответил:\n{result}")
         else:
-            await message.answer("❌ Не удалось получить ответ от API")
-            
+            await message.answer("❌ YandexGPT не ответил")
     except Exception as e:
         await message.answer(f"❌ Ошибка: {e}")
 
