@@ -43,6 +43,13 @@ dp = Dispatcher()
 db = Database()
 
 # ============================================
+# ТЕСТОВЫЙ ОБРАБОТЧИК (ВРЕМЕННО)
+# ============================================
+@dp.message(Command("test"))
+async def test_handler(message: types.Message):
+    await message.answer(f"✅ Тест работает! Ваш ID: {message.from_user.id}")
+
+# ============================================
 # СОСТОЯНИЯ
 # ============================================
 STATE_IDLE = 0
