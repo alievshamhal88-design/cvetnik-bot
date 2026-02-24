@@ -1,11 +1,12 @@
 import logging
 import os
 import json
+import asyncio
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 from aiogram.filters import Command
 from aiogram import F
-import asyncio
+from aiohttp import web  # Добавляем для пинг-сервера
 
 # Настройки бота
 API_TOKEN = "8462470094:AAHSlSA20IvbGG2AMOBDL9qk3eqXakzuwWg"
@@ -88,6 +89,25 @@ main_keyboard = ReplyKeyboardMarkup(
     ],
     resize_keyboard=True
 )
+
+# --- ВЕБ-СЕРВЕР ДЛЯ ПИНГА (ЧТОБЫ RENDER НЕ УСЫПЛЯЛ) ---
+async def handle_ping(request):
+    """Обработчик для пинг-запросов от UptimeRobot"""
+    return web.Response(text='OK')
+
+async def run_web_server():
+    """Запуск простого веб-сервера для пинга"""
+    app = web.Application()
+    app.router.add_get('/', handle_ping)
+    app.router.add_get('/ping', handle_ping)
+    app.router.add_get('/health', handle_ping)
+    
+    port = int(os.environ.get('PORT', 10000))
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+    print(f"✅ Пинг-сервер запущен на порту {port}")
 
 # ---------- ИСПРАВЛЕННАЯ ФУНКЦИЯ cmd_start С ПОДДЕРЖКОЙ ПАРАМЕТРОВ ----------
 @dp.message(Command("start"))
@@ -477,7 +497,11 @@ async def send_order_to_florist(message: types.Message, user_id: int):
             except Exception as e:
                 logging.error(f"❌ Ошибка отправки в {branch_name}: {e}")
 
+# --- ИСПРАВЛЕННАЯ ФУНКЦИЯ MAIN С ЗАПУСКОМ ПИНГ-СЕРВЕРА ---
 async def main():
+    # Запускаем веб-сервер для пинга в фоне
+    asyncio.create_task(run_web_server())
+    # Запускаем бота
     await dp.start_polling(bot)
 
 if __name__ == '__main__':
