@@ -4,7 +4,7 @@ ADMIN_IDS = [
     7750251679,  # @Alan_Aliev
 ]
 
-# Настройки Gemini
+# Модели Gemini для fallback
 GEMINI_MODELS = [
     'gemini-2.5-flash',
     'gemini-2.5-pro',
