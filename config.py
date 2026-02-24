@@ -4,10 +4,16 @@ ADMIN_IDS = [
     7750251679,  # @Alan_Aliev
 ]
 
-# Модели Gemini для fallback
-GEMINI_MODELS = [
-    'gemini-2.5-flash',
-    'gemini-2.5-pro',
-    'gemini-3.0-flash-preview',
-    'gemini-3.1-pro-preview'
+# Модели GigaChat (в порядке предпочтения)
+GIGACHAT_MODELS = [
+    'GigaChat-2-Max',
+    'GigaChat-2-Pro',
+    'GigaChat-2-Lite',
+    'GigaChat'
 ]
+
+# Авторизационные данные (будут в переменных окружения)
+GIGACHAT_CLIENT_ID = os.getenv("GIGACHAT_CLIENT_ID")
+GIGACHAT_CLIENT_SECRET = os.getenv("GIGACHAT_CLIENT_SECRET")
+# Или готовый Authorization Key
+GIGACHAT_AUTH_KEY = os.getenv("GIGACHAT_AUTH_KEY")
