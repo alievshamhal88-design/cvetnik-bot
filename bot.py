@@ -6,7 +6,6 @@ import random
 from datetime import datetime, timedelta
 from io import BytesIO
 from PIL import Image
-import google.generativeai as genai
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.types import (
     ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove,
@@ -15,19 +14,29 @@ from aiogram.types import (
 from aiogram.filters import Command
 from aiohttp import web
 
-from config import ADMIN_IDS, GEMINI_MODELS
+from config import ADMIN_IDS
 from database import Database
+from gigachat_client import GigaChatClient
 
 # ============================================
 # НАСТРОЙКИ БОТА
 # ============================================
 API_TOKEN = "8462470094:AAHSlSA20IvbGG2AMOBDL9qk3eqXakzuwWg"
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-if not GEMINI_API_KEY:
-    raise ValueError("❌ GEMINI_API_KEY не найден в переменных окружения!")
+# GigaChat авторизация
+GIGACHAT_AUTH_KEY = os.getenv("GIGACHAT_AUTH_KEY")
+GIGACHAT_CLIENT_ID = os.getenv("GIGACHAT_CLIENT_ID")
+GIGACHAT_CLIENT_SECRET = os.getenv("GIGACHAT_CLIENT_SECRET")
 
-genai.configure(api_key=GEMINI_API_KEY)
+if GIGACHAT_AUTH_KEY:
+    gigachat = GigaChatClient(auth_key=GIGACHAT_AUTH_KEY)
+elif GIGACHAT_CLIENT_ID and GIGACHAT_CLIENT_SECRET:
+    gigachat = GigaChatClient(
+        client_id=GIGACHAT_CLIENT_ID,
+        client_secret=GIGACHAT_CLIENT_SECRET
+    )
+else:
+    raise ValueError("❌ Не найдены авторизационные данные для GigaChat!")
 
 BRANCHES = {
     '2-я Марата, 22': {'id': 7364255009, 'username': '@cvetnik_sib', 'is_admin': False},
@@ -73,7 +82,7 @@ user_data = {}
 user_states = {}
 
 # ============================================
-# КЛАВИАТУРЫ
+# КЛАВИАТУРЫ (без изменений)
 # ============================================
 client_phone_keyboard = ReplyKeyboardMarkup(
     keyboard=[[KeyboardButton(text="📱 Отправить мой номер", request_contact=True)]],
@@ -140,63 +149,40 @@ async def run_web_server():
     logger.info(f"✅ Пинг-сервер запущен на порту {port}")
 
 # ============================================
-# ФУНКЦИИ ДЛЯ GEMINI
+# ФУНКЦИИ ДЛЯ GIGACHAT
 # ============================================
-async def generate_with_fallback(prompt, image=None, max_retries=3):
-    for attempt in range(max_retries):
-        for model_name in GEMINI_MODELS:
-            try:
-                model = genai.GenerativeModel(model_name)
-                if image:
-                    response = model.generate_content([prompt, image])
-                else:
-                    response = model.generate_content(prompt)
-                if response and response.text:
-                    return response.text.strip()
-            except Exception as e:
-                logger.warning(f"⚠️ Ошибка с моделью {model_name}: {e}")
-                continue
-        await asyncio.sleep(1)
-    return None
-
 async def generate_bouquet_info(photo_file_id):
+    """
+    GigaChat смотрит на фото и генерирует название и описание
+    """
     try:
+        # Скачиваем фото
         file_info = await bot.get_file(photo_file_id)
         file_bytes = await bot.download_file(file_info.file_path)
-        image = Image.open(BytesIO(file_bytes.read()))
+        image_bytes = file_bytes.read()
         
-        prompt = (
-            "Посмотри на это фото букета цветов. Напиши для него:\n\n"
-            "1. КРАСИВОЕ НАЗВАНИЕ (2-4 слова, поэтичное, на русском)\n"
-            "2. КОРОТКОЕ ОПИСАНИЕ (2-3 предложения о букете: какие цветы, "
-            "какое настроение, для какого повода подойдёт)\n\n"
-            "Формат ответа (строго соблюдай):\n"
-            "Название: ...\n"
-            "Описание: ..."
+        # Генерируем через GigaChat
+        result = gigachat.generate_with_image(
+            prompt="",
+            image_bytes=image_bytes,
+            model='GigaChat-2-Max'
         )
         
-        result = await generate_with_fallback(prompt, image)
-        
         if result:
-            lines = result.split('\n')
-            name = "Волшебный букет"
-            description = "Нежный букет для особенного случая."
-            for line in lines:
-                if line.startswith('Название:'):
-                    name = line.replace('Название:', '').strip()
-                elif line.startswith('Описание:'):
-                    description = line.replace('Описание:', '').strip()
+            name, description = result
+            logger.info(f"✅ GigaChat: {name}")
             return name, description
         
     except Exception as e:
-        logger.error(f"❌ Ошибка Gemini: {e}")
+        logger.error(f"❌ Ошибка GigaChat: {e}")
     
+    # Запасные варианты
     fallback_names = ["Нежность утра", "Цветочная симфония", "Весеннее настроение"]
     fallback_desc = ["Нежный букет из свежих цветов, собранный с любовью."]
     return random.choice(fallback_names), random.choice(fallback_desc)
 
 # ============================================
-# КОМАНДА START
+# ОБРАБОТЧИКИ
 # ============================================
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
@@ -214,6 +200,23 @@ async def cmd_start(message: types.Message):
 async def test_handler(message: types.Message):
     await message.answer(f"✅ Тест работает! Ваш ID: {message.from_user.id}")
 
+@dp.message(Command("test_gigachat"))
+async def test_gigachat(message: types.Message):
+    """Тест GigaChat без фото"""
+    try:
+        result = gigachat.generate_with_image(
+            prompt="Придумай красивое название для букета цветов",
+            image_bytes=None,
+            model='GigaChat-2-Lite'
+        )
+        if result:
+            name, desc = result
+            await message.answer(f"✅ GigaChat ответил:\nНазвание: {name}\nОписание: {desc}")
+        else:
+            await message.answer("❌ GigaChat не ответил")
+    except Exception as e:
+        await message.answer(f"❌ Ошибка: {e}")
+
 # ============================================
 # ЗАГРУЗКА ФОТО АДМИНИСТРАТОРОМ
 # ============================================
@@ -221,40 +224,30 @@ async def test_handler(message: types.Message):
 async def handle_admin_photo(message: types.Message):
     """Администратор загружает фото для каталога"""
     user_id = message.from_user.id
-    logger.info(f"📸 Получено фото от пользователя {user_id}")
     
-    # Проверяем права
     if user_id not in ADMIN_IDS:
-        logger.warning(f"⛔️ Пользователь {user_id} не админ")
         await message.answer("❌ У вас нет прав администратора")
         return
     
     try:
         photo = message.photo[-1]
         file_id = photo.file_id
-        logger.info(f"🆔 File_id: {file_id}")
         
-        # Сохраняем фото локально
         file_info = await bot.get_file(file_id)
         file_path = f"data/bouquets/{file_id}.jpg"
         await bot.download_file(file_info.file_path, file_path)
-        logger.info(f"💾 Фото сохранено: {file_path}")
         
-        # Добавляем в базу
         success = db.add_bouquet(file_id, file_path)
         
         if success:
             count = db.get_bouquets_count()
-            await message.answer(
-                f"✅ Фото добавлено в каталог!\n"
-                f"📊 Всего букетов: {count}"
-            )
+            await message.answer(f"✅ Фото добавлено в каталог! Всего букетов: {count}")
         else:
-            await message.answer("❌ Ошибка при сохранении в базу данных")
+            await message.answer("❌ Ошибка при сохранении")
             
     except Exception as e:
-        logger.error(f"❌ Ошибка при обработке фото: {e}")
-        await message.answer(f"❌ Произошла ошибка: {e}")
+        logger.error(f"❌ Ошибка: {e}")
+        await message.answer(f"❌ Ошибка: {e}")
 
 # ============================================
 # ВЫБОР БУКЕТА ИЗ КАТАЛОГА
@@ -300,13 +293,11 @@ async def select_bouquet(callback: types.CallbackQuery):
     
     name = user_data.get(user_id, {}).get(f'b_name_{index}', "Выбранный букет")
     desc = user_data.get(user_id, {}).get(f'b_desc_{index}', "")
-    bouquet_id = user_data.get(user_id, {}).get(f'b_id_{index}')
     
     user_data[user_id] = user_data.get(user_id, {})
     user_data[user_id]['product'] = name
     user_data[user_id]['product_description'] = desc
     user_data[user_id]['product_source'] = 'catalog_ai'
-    user_data[user_id]['selected_bouquet_id'] = bouquet_id
     
     await callback.message.answer(
         f"✅ Вы выбрали: **{name}**\n\n📝 Теперь напишите ваше имя:",
@@ -425,14 +416,13 @@ async def order_start(message: types.Message):
     )
 
 # ============================================
-# ОБРАБОТКА ТЕКСТА (ВВОД ДАННЫХ)
+# ОБРАБОТКА ТЕКСТА
 # ============================================
 @dp.message(F.text)
 async def handle_text(message: types.Message):
     user_id = message.from_user.id
     text = message.text
     
-    # Пропускаем главные кнопки
     if text in ["🛒 Оформить заказ", "🌸 Выбрать букет из каталога", 
                 "🎂 Сохранить день рождения", "📦 Цветочная подписка",
                 "📞 Связаться с флористом", "ℹ️ О нас"]:
@@ -440,7 +430,7 @@ async def handle_text(message: types.Message):
     
     state = user_states.get(user_id)
     
-    # Шаги подписки (проверяем ПЕРВЫМИ)
+    # Шаги подписки
     if state == STATE_SUB_RECIPIENT:
         user_data[user_id]['sub_recipient'] = text
         user_states[user_id] = STATE_SUB_PHONE
@@ -527,7 +517,7 @@ async def handle_text(message: types.Message):
             )
         return
     
-    # Шаги заказа (остальные)
+    # Шаги заказа
     if state == STATE_WAITING_PRODUCT:
         user_data[user_id]['product'] = text
         user_states[user_id] = STATE_WAITING_CLIENT_NAME
