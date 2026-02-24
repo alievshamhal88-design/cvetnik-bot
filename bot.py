@@ -4,7 +4,6 @@ import json
 import asyncio
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
-from aiogram.contrib.middlewares.logging import LoggingMiddleware
 from aiogram.filters import Command
 from aiogram import F
 from aiohttp import web
@@ -26,7 +25,6 @@ logger = logging.getLogger(__name__)
 # Инициализация бота
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
-dp.middleware.setup(LoggingMiddleware())
 
 # Состояния пользователя
 STATE_IDLE = 0
