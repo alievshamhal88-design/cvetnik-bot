@@ -262,6 +262,25 @@ async def test_yandex(message: types.Message):
         await message.answer(f"❌ Ошибка: {e}")
 
 # ============================================
+# СТАТИСТИКА КАТАЛОГА
+# ============================================
+@dp.message(Command("stats"))
+async def cmd_stats(message: types.Message):
+    """Показывает статистику каталога"""
+    user_id = message.from_user.id
+    
+    if user_id not in ADMIN_IDS:
+        await message.answer("❌ У вас нет прав администратора")
+        return
+    
+    count = db.get_bouquets_count()
+    await message.answer(
+        f"📊 **Статистика каталога**\n\n"
+        f"🌸 Всего букетов: {count}",
+        parse_mode='Markdown'
+    )
+
+# ============================================
 # ЗАГРУЗКА ФОТО АДМИНИСТРАТОРОМ
 # ============================================
 @dp.message(F.photo)
@@ -292,22 +311,7 @@ async def handle_admin_photo(message: types.Message):
     except Exception as e:
         logger.error(f"❌ Ошибка: {e}")
         await message.answer(f"❌ Ошибка: {e}")
-@dp.message(Command("stats"))
-async def cmd_stats(message: types.Message):
-    """Показывает статистику каталога"""
-    user_id = message.from_user.id
-    
-    # Проверяем права администратора
-    if user_id not in ADMIN_IDS:
-        await message.answer("❌ У вас нет прав администратора")
-        return
-    
-    count = db.get_bouquets_count()
-    await message.answer(
-        f"📊 **Статистика каталога**\n\n"
-        f"🌸 Всего букетов: {count}",
-        parse_mode='Markdown'
-    )
+
 # ============================================
 # ОБРАБОТКА КОНТАКТА (НОМЕРА ТЕЛЕФОНА)
 # ============================================
