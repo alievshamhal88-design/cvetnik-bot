@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 # ============================================
 API_TOKEN = "8462470094:AAHSlSA20IvbGG2AMOBDL9qk3eqXakzuwWg"
 
-# Инициализация YandexGPT
+# Инициализация YandexGPT (если нужен для других целей)
 try:
     yandex_gpt = YandexGPTClient()
     logger.info("✅ YandexGPT клиент создан")
@@ -37,10 +37,11 @@ except ValueError as e:
     logger.error(f"❌ Ошибка создания YandexGPT клиента: {e}")
     yandex_gpt = None
 
+# Филиалы (больше нет флага is_admin)
 BRANCHES = {
-    '2-я Марата, 22': {'id': 7364255009, 'username': '@cvetnik_sib', 'is_admin': False},
-    'Некрасова, 41': {'id': 7651760894, 'username': '@cvetnik1_sib', 'is_admin': True},
-    'Связистов, 113А': {'id': 8575692209, 'username': '@cvetniksvezistrov', 'is_admin': False}
+    '2-я Марата, 22': {'id': 7364255009, 'username': '@cvetnik_sib'},
+    'Некрасова, 41': {'id': 7651760894, 'username': '@cvetnik1_sib'},
+    'Связистов, 113А': {'id': 8575692209, 'username': '@cvetniksvezistrov'}
 }
 
 # ============================================
@@ -101,16 +102,17 @@ card_keyboard = ReplyKeyboardMarkup(
     one_time_keyboard=True
 )
 
+# Клавиатура выбора филиала (ТОЛЬКО 3 ФИЛИАЛА, БЕЗ ДОСТАВКИ)
 branch_keyboard = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="🏢 2-я Марата, 22")],
         [KeyboardButton(text="🏢 Некрасова, 41")],
-        [KeyboardButton(text="🏢 Связистов, 113А")],
-        [KeyboardButton(text="🚚 Доставка")]
+        [KeyboardButton(text="🏢 Связистов, 113А")]
     ],
     resize_keyboard=True
 )
 
+# Главное меню
 main_keyboard = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="🛒 Оформить заказ")],
@@ -142,14 +144,11 @@ async def run_web_server():
     logger.info(f"✅ Пинг-сервер запущен на порту {port}")
 
 # ============================================
-# ВЫБОР БУКЕТА ИЗ КАТАЛОГА
+# ВЫБОР БУКЕТА ИЗ КАТАЛОГА (ПРОСТАЯ ССЫЛКА)
 # ============================================
 @dp.message(F.text == "🌸 Выбрать букет из каталога")
 async def catalog_start(message: types.Message):
     """Перенаправляет клиента на сайт с каталогом"""
-    user_id = message.from_user.id
-    
-    # Создаём клавиатуру с кнопкой-ссылкой
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
             text="🌸 Открыть каталог на сайте", 
@@ -184,36 +183,6 @@ async def cmd_start(message: types.Message):
 async def test_handler(message: types.Message):
     await message.answer(f"✅ Тест работает! Ваш ID: {message.from_user.id}")
 
-@dp.message(Command("test_yandex"))
-async def test_yandex(message: types.Message):
-    """Тест YandexGPT"""
-    try:
-        folder_id = os.getenv("YANDEX_FOLDER_ID")
-        api_key = os.getenv("YANDEX_API_KEY")
-        
-        if not folder_id or not api_key:
-            await message.answer("❌ Отсутствуют переменные окружения")
-            return
-            
-        await message.answer(f"🔄 Использую Folder ID: {folder_id[:5]}...")
-        
-        if yandex_gpt is None:
-            await message.answer("❌ YandexGPT клиент не инициализирован")
-            return
-        
-        result = yandex_gpt.generate_test()
-        
-        if result:
-            await message.answer(f"✅ Успех! Ответ: {result}")
-        else:
-            await message.answer("❌ Не удалось получить ответ от API")
-            
-    except Exception as e:
-        await message.answer(f"❌ Ошибка: {e}")
-
-# ============================================
-# СТАТИСТИКА КАТАЛОГА
-# ============================================
 @dp.message(Command("stats"))
 async def cmd_stats(message: types.Message):
     """Показывает статистику каталога"""
@@ -270,7 +239,6 @@ async def handle_client_phone(message: types.Message):
     user_id = message.from_user.id
     logger.info(f"📱 Получен контакт от пользователя {user_id}")
     
-    # Проверяем состояние
     current_state = user_states.get(user_id)
     
     if current_state != STATE_WAITING_CLIENT_PHONE:
@@ -278,14 +246,9 @@ async def handle_client_phone(message: types.Message):
         await message.answer("Пожалуйста, начните оформление заказа сначала.")
         return
     
-    # Сохраняем номер телефона
     phone = message.contact.phone_number
     user_data[user_id]['client_phone'] = phone
-    logger.info(f"✅ Номер сохранён: {phone}")
-    
-    # Меняем состояние
     user_states[user_id] = STATE_WAITING_ADDRESS
-    logger.info(f"➡️ Новое состояние: {STATE_WAITING_ADDRESS}")
     
     await message.answer(
         "✅ Номер получен!\n\n"
@@ -356,9 +319,9 @@ async def subscription_info(callback: types.CallbackQuery):
 async def contact_florist(message: types.Message):
     await message.answer(
         "📞 **Контакты наших филиалов:**\n\n"
+        "🏢 **2-я Марата, 22**\n📱 +7‒995‒390‒12‒02\n\n"
         "🏢 **Некрасова, 41**\n📱 +7‒995‒390‒23‒55\n\n"
-        "🏢 **2-я улица Марата, 22**\n📱 +7‒995‒390‒12‒02\n\n"
-        "🏢 **Улица Связистов, 113а**\n📱 +7‒993‒952‒23‒55\n\n"
+        "🏢 **Связистов, 113а**\n📱 +7‒993‒952‒23‒55\n\n"
         "📧 Email: cvetniknsk@yandex.ru",
         parse_mode='Markdown',
         reply_markup=main_keyboard
@@ -404,14 +367,13 @@ async def order_start(message: types.Message):
     )
 
 # ============================================
-# ОБРАБОТКА ТЕКСТА (С ПРАВИЛЬНЫМИ ПРИОРИТЕТАМИ)
+# ОБРАБОТКА ТЕКСТА
 # ============================================
 @dp.message(F.text)
 async def handle_text(message: types.Message):
     user_id = message.from_user.id
     text = message.text
     
-    # Пропускаем главные кнопки
     if text in ["🛒 Оформить заказ", "🌸 Выбрать букет из каталога", 
                 "🎂 Сохранить день рождения", "📦 Цветочная подписка",
                 "📞 Связаться с флористом", "ℹ️ О нас"]:
@@ -419,7 +381,7 @@ async def handle_text(message: types.Message):
     
     state = user_states.get(user_id)
     
-    # Шаги подписки (самые приоритетные)
+    # Шаги подписки
     if state == STATE_SUB_RECIPIENT:
         user_data[user_id]['sub_recipient'] = text
         user_states[user_id] = STATE_SUB_PHONE
@@ -479,7 +441,7 @@ async def handle_text(message: types.Message):
             await message.answer("❌ Введите число (например: 3000)")
         return
     
-    # Шаги заказа (вторые по приоритету)
+    # Шаги заказа
     if state == STATE_WAITING_PRODUCT:
         user_data[user_id]['product'] = text
         user_states[user_id] = STATE_WAITING_CLIENT_NAME
@@ -545,13 +507,14 @@ async def handle_text(message: types.Message):
         )
         return
     
+    # ВЫБОР ФИЛИАЛА (ТОЛЬКО 3 ВАРИАНТА)
     if state == STATE_WAITING_BRANCH:
         branch_map = {
             "🏢 2-я Марата, 22": "2-я Марата, 22",
             "🏢 Некрасова, 41": "Некрасова, 41",
-            "🏢 Связистов, 113А": "Связистов, 113А",
-            "🚚 Доставка": "доставка"
+            "🏢 Связистов, 113А": "Связистов, 113А"
         }
+        
         if text in branch_map:
             user_data[user_id]['branch'] = branch_map[text]
             await send_order_to_florist(message, user_id)
@@ -560,7 +523,7 @@ async def handle_text(message: types.Message):
                 f"🌸 Букет: {user_data[user_id]['product']}\n"
                 f"👤 Получатель: {user_data[user_id]['recipient_name']}\n"
                 f"📍 Адрес: {user_data[user_id]['address']}\n"
-                f"🏢 {branch_map[text]}\n"
+                f"🏢 Филиал: {branch_map[text]}\n"
                 f"💌 Открытка: {user_data[user_id].get('card_text', 'Без открытки')}",
                 parse_mode='Markdown',
                 reply_markup=main_keyboard
@@ -570,7 +533,7 @@ async def handle_text(message: types.Message):
             await message.answer("Пожалуйста, выберите вариант из меню:")
         return
     
-    # День рождения (самый низкий приоритет)
+    # День рождения
     if state == STATE_BIRTHDAY_WAITING:
         try:
             parts = text.split(' ', 1)
@@ -598,9 +561,10 @@ async def handle_text(message: types.Message):
         return
 
 # ============================================
-# ОТПРАВКА ЗАКАЗА ФЛОРИСТАМ
+# ОТПРАВКА ЗАКАЗА ТОЛЬКО В ВЫБРАННЫЙ ФИЛИАЛ
 # ============================================
 async def send_order_to_florist(message: types.Message, user_id: int):
+    """Отправляет заказ только в выбранный филиал"""
     client_name = user_data[user_id].get('client_name', 'Не указано')
     username = message.from_user.username or "Нет username"
     
@@ -621,33 +585,17 @@ async def send_order_to_florist(message: types.Message, user_id: int):
     if user_data[user_id].get('card_text'):
         order_text += f"💌 Открытка: {user_data[user_id]['card_text']}\n"
     
-    order_text += f"🏢 Филиал: {user_data[user_id]['branch']}\n🆔 @{username}"
+    chosen_branch = user_data[user_id]['branch']
+    order_text += f"🏢 Филиал: {chosen_branch}\n🆔 @{username}"
     
-    branch = user_data[user_id]['branch']
-    admin_id = 7651760894
-    
-    # Администратору
+    # Отправляем ТОЛЬКО в выбранный филиал
+    florist_id = BRANCHES[chosen_branch]['id']
     try:
-        await bot.send_message(chat_id=admin_id, text=order_text)
-        logger.info(f"✅ Администратору {admin_id}")
+        await bot.send_message(chat_id=florist_id, text=order_text)
+        logger.info(f"✅ Заказ отправлен в филиал {chosen_branch}")
     except Exception as e:
-        logger.error(f"❌ Ошибка админу: {e}")
-    
-    # Филиалам
-    if branch == "доставка":
-        for name, info in BRANCHES.items():
-            try:
-                await bot.send_message(chat_id=info['id'], text=order_text)
-                logger.info(f"✅ {name}")
-            except Exception as e:
-                logger.error(f"❌ {name}: {e}")
-    else:
-        florist_id = BRANCHES[branch]['id']
-        try:
-            await bot.send_message(chat_id=florist_id, text=order_text)
-            logger.info(f"✅ {branch}")
-        except Exception as e:
-            logger.error(f"❌ {branch}: {e}")
+        logger.error(f"❌ Ошибка отправки в {chosen_branch}: {e}")
+        await message.answer("⚠️ Произошла ошибка, но мы уже знаем о проблеме. Флорист скоро свяжется!")
 
 # ============================================
 # ЗАПУСК
