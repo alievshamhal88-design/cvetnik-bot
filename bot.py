@@ -146,74 +146,24 @@ async def run_web_server():
 # ============================================
 @dp.message(F.text == "🌸 Выбрать букет из каталога")
 async def catalog_start(message: types.Message):
+    """Перенаправляет клиента на сайт с каталогом"""
     user_id = message.from_user.id
     
-    if db.get_bouquets_count() == 0:
-        await message.answer("😢 В каталоге пока нет букетов. Скоро добавим!")
-        return
+    # Создаём клавиатуру с кнопкой-ссылкой
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="🌸 Открыть каталог на сайте", 
+            url="https://cvetniknsk.ru"
+        )]
+    ])
     
-    for i in range(3):
-        bouquet = db.get_random_bouquet()
-        if not bouquet:
-            continue
-        
-        status_msg = await message.answer(f"🌸 Придумываю красивое название... ✨")
-        
-        # Генерируем название
-        name = None
-        if yandex_gpt:
-            name = yandex_gpt.generate_bouquet_name()
-        
-        # Если не получилось — запасной вариант
-        if not name:
-            fallback_names = ["Нежность утра", "Цветочная симфония", "Весеннее настроение", 
-                            "Аромат любви", "Солнечный день", "Летний сад"]
-            name = random.choice(fallback_names)
-        
-        await status_msg.delete()
-        
-        # Описание с информацией о цене
-        description = (
-            "✨ Конечную стоимость букета с вашей скидкой сформируем\n"
-            "после оформления заказа при уточнении деталей."
-        )
-        
-        user_data[user_id] = user_data.get(user_id, {})
-        user_data[user_id][f'b_name_{i}'] = name
-        user_data[user_id][f'b_desc_{i}'] = description
-        user_data[user_id][f'b_id_{i}'] = bouquet['id']
-        
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="✅ Выбрать этот букет", callback_data=f"select_{i}")]
-        ])
-        
-        caption = f"🌸 **{name}**\n\n{description}"
-        await message.answer_photo(
-            photo=bouquet['photo_file_id'],
-            caption=caption,
-            reply_markup=keyboard,
-            parse_mode='Markdown'
-        )
-
-@dp.callback_query(F.data.startswith('select_'))
-async def select_bouquet(callback: types.CallbackQuery):
-    index = int(callback.data.split('_')[1])
-    user_id = callback.from_user.id
-    
-    name = user_data.get(user_id, {}).get(f'b_name_{index}', "Выбранный букет")
-    desc = user_data.get(user_id, {}).get(f'b_desc_{index}', "")
-    
-    user_data[user_id] = user_data.get(user_id, {})
-    user_data[user_id]['product'] = name
-    user_data[user_id]['product_description'] = desc
-    user_data[user_id]['product_source'] = 'catalog_ai'
-    
-    await callback.message.answer(
-        f"✅ Вы выбрали: **{name}**\n\n📝 Теперь напишите ваше имя:",
+    await message.answer(
+        "🌸 **Выбрать букет**\n\n"
+        "Все наши букеты вы можете посмотреть на сайте.\n"
+        "После выбора возвращайтесь в бот для оформления заказа!",
+        reply_markup=keyboard,
         parse_mode='Markdown'
     )
-    user_states[user_id] = STATE_WAITING_CLIENT_NAME
-    await callback.answer()
 
 # ============================================
 # КОМАНДА START
