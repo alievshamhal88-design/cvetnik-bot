@@ -1,21 +1,18 @@
 import os
 
-# ID администраторов
+# ID администраторов (кто может загружать фото в каталог)
+# Здесь только ваш личный ID
 ADMIN_IDS = [
-    7651760894,  # @cvetnik1_sib
     7750251679,  # @Alan_Aliev
 ]
 
-# Настройки Yandex Cloud
-YANDEX_FOLDER_ID = os.getenv("YANDEX_FOLDER_ID")
-YANDEX_API_KEY = os.getenv("YANDEX_API_KEY")
-
-if not YANDEX_FOLDER_ID or not YANDEX_API_KEY:
-    raise ValueError("❌ Не найдены YANDEX_FOLDER_ID или YANDEX_API_KEY в переменных окружения!")
-
-# Модели YandexGPT (в порядке предпочтения)
+# Модели YandexGPT (если ещё используете)
 YANDEX_MODELS = [
     "yandexgpt/latest",
     "yandexgpt/rc",
     "yandexgpt/3"
 ]
+
+# Yandex Cloud AI (если используете)
+YANDEX_FOLDER_ID = os.getenv("YANDEX_FOLDER_ID")
+YANDEX_API_KEY = os.getenv("YANDEX_API_KEY")
